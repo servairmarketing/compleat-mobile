@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dropdown_search/dropdown_search.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
@@ -266,23 +267,47 @@ class _ProductionScreenState extends State<ProductionScreen>
             _buildTextField('Parent Roll ID 2 *', _lpParent2),
           ],
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _lpSelectedProduct,
-            style: const TextStyle(fontSize: 17, color: Colors.black),
-            decoration: const InputDecoration(
-              labelText: 'Product *',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+          DropdownSearch<String>(
+            items: _products.map((p) => '\${p['product_id']} — \${p['product_name']}').toList(),
+            selectedItem: _lpSelectedProduct != null && _products.any((p) => p['product_id'] == _lpSelectedProduct)
+                ? '\$_lpSelectedProduct — \${_products.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
+                : null,
+            dropdownDecoratorProps: const DropDownDecoratorProps(
+              dropdownSearchDecoration: InputDecoration(
+                labelText: 'Product *',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+              ),
             ),
-            items: _products.map((p) => DropdownMenuItem<String>(
-              value: p['product_id']?.toString(),
-              child: Text('${p['product_id']} — ${p['product_name']}', style: const TextStyle(fontSize: 15)),
-            )).toList(),
-            onChanged: (v) => setState(() {
-              _lpSelectedProduct = v;
-              _lpSelectedProductName = _products.firstWhere(
-                (p) => p['product_id'] == v, orElse: () => {})['product_name']?.toString();
-            }),
+            popupProps: PopupProps.menu(
+              showSearchBox: true,
+              searchFieldProps: const TextFieldProps(
+                decoration: InputDecoration(
+                  hintText: 'Type to search...',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                ),
+                autofocus: true,
+              ),
+              constraints: const BoxConstraints(maxHeight: 300),
+              itemBuilder: (context, item, isSelected) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                child: Text(item, style: TextStyle(
+                  fontSize: 16,
+                  color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                )),
+              ),
+            ),
+            onChanged: (val) {
+              if (val == null) return;
+              final id = val.split(' — ')[0];
+              setState(() {
+                _lpSelectedProduct = id;
+                _lpSelectedProductName = _products.firstWhere(
+                  (p) => p['product_id'] == id, orElse: () => {})['product_name']?.toString();
+              });
+            },
           ),
           const SizedBox(height: 12),
           _buildTextField('Number of Labels *', _lpQtyController, numeric: true),

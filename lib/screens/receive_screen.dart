@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dropdown_search/dropdown_search.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
@@ -173,15 +174,47 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Widget _buildDropdown(String label, List<Map> items, String idKey, String nameKey, String? value, Function(String?) onChanged) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      style: const TextStyle(fontSize: 18, color: Colors.black),
-      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14)),
-      items: items.map((item) => DropdownMenuItem<String>(
-        value: item[idKey]?.toString(),
-        child: Text('${item[idKey]} — ${item[nameKey]}', style: const TextStyle(fontSize: 16)),
-      )).toList(),
-      onChanged: onChanged,
+    final itemList = items.map((item) => '${item[idKey]} — ${item[nameKey]}').toList();
+    final selectedItem = value != null
+        ? items.where((i) => i[idKey]?.toString() == value).isNotEmpty
+            ? '${items.firstWhere((i) => i[idKey]?.toString() == value)[idKey]} — ${items.firstWhere((i) => i[idKey]?.toString() == value)[nameKey]}'
+            : null
+        : null;
+    return DropdownSearch<String>(
+      items: itemList,
+      selectedItem: selectedItem,
+      dropdownDecoratorProps: DropDownDecoratorProps(
+        dropdownSearchDecoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+        ),
+      ),
+      popupProps: PopupProps.menu(
+        showSearchBox: true,
+        searchFieldProps: const TextFieldProps(
+          decoration: InputDecoration(
+            hintText: 'Type to search...',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          ),
+          autofocus: true,
+        ),
+        constraints: const BoxConstraints(maxHeight: 300),
+        itemBuilder: (context, item, isSelected) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Text(item, style: TextStyle(
+            fontSize: 16,
+            color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          )),
+        ),
+      ),
+      onChanged: (val) {
+        if (val == null) { onChanged(null); return; }
+        final id = val.split(' — ')[0];
+        onChanged(id);
+      },
     );
   }
 }
