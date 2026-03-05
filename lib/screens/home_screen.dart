@@ -14,6 +14,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   Map<String, dynamic>? _userProfile;
+  List<_NavItem> _navItems = [];
 
   @override
   void initState() {
@@ -23,43 +24,92 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadProfile() async {
     final profile = await ApiService.getUserProfile();
-    setState(() => _userProfile = profile);
+    setState(() {
+      _userProfile = profile;
+      _navItems = _buildNavItems(profile);
+    });
+  }
+
+  List<_NavItem> _buildNavItems(Map<String, dynamic>? profile) {
+    final modules = List<String>.from(profile?['modules'] ?? []);
+    final role = profile?['role']?.toString() ?? '';
+    final items = <_NavItem>[];
+
+    if (modules.contains('receive') || role == 'admin') {
+      items.add(_NavItem(
+        label: 'Receive',
+        icon: Icons.download_rounded,
+        screen: const ReceiveScreen(),
+      ));
+    }
+
+    if (modules.contains('production') || role == 'admin') {
+      items.add(_NavItem(
+        label: 'Production',
+        icon: Icons.precision_manufacturing,
+        screen: const ProductionScreen(),
+      ));
+    }
+
+    items.add(_NavItem(
+      label: 'History',
+      icon: Icons.history,
+      screen: const HistoryScreen(),
+    ));
+
+    return items;
   }
 
   Future<void> _logout() async {
     await ApiService.logout();
-    if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+    if (mounted) {
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+    }
   }
-
-  final List<Widget> _screens = [
-    const ReceiveScreen(),
-    const ProductionScreen(),
-    const HistoryScreen(),
-  ];
 
   @override
   Widget build(BuildContext context) {
+    if (_navItems.isEmpty) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF1a73e8),
         foregroundColor: Colors.white,
-        title: Row(
+        title: const Row(
           children: [
-            const Icon(Icons.inventory_2, size: 28),
-            const SizedBox(width: 8),
-            const Text('Com-Pleat IMS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Icon(Icons.inventory_2, size: 28),
+            SizedBox(width: 8),
+            Text('Com-Pleat IMS',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           ],
         ),
         actions: [
           if (_userProfile != null)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Center(child: Text(_userProfile!['name'] ?? '', style: const TextStyle(fontSize: 14))),
+              padding: const EdgeInsets.only(right: 4),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(_userProfile!['name'] ?? '',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    Text(_userProfile!['role'] ?? '',
+                        style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  ],
+                ),
+              ),
             ),
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout, tooltip: 'Logout'),
+          IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: _logout,
+              tooltip: 'Logout'),
         ],
       ),
-      body: _screens[_selectedIndex],
+      body: _navItems[_selectedIndex].screen,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (i) => setState(() => _selectedIndex = i),
@@ -68,12 +118,20 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedFontSize: 14,
         unselectedFontSize: 12,
         iconSize: 32,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.download_rounded), label: 'Receive'),
-          BottomNavigationBarItem(icon: Icon(Icons.precision_manufacturing), label: 'Production'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
-        ],
+        items: _navItems
+            .map((item) => BottomNavigationBarItem(
+                  icon: Icon(item.icon),
+                  label: item.label,
+                ))
+            .toList(),
       ),
     );
   }
+}
+
+class _NavItem {
+  final String label;
+  final IconData icon;
+  final Widget screen;
+  _NavItem({required this.label, required this.icon, required this.screen});
 }
