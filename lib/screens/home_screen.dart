@@ -78,12 +78,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF1a73e8),
         foregroundColor: Colors.white,
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.inventory_2, size: 28),
-            SizedBox(width: 8),
-            Text('Com-Pleat IMS',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Image.asset('assets/images/logo-compleat.jpg', height: 32, fit: BoxFit.contain),
+            const SizedBox(width: 10),
+            Image.asset('assets/images/logo-servair.jpg', height: 32, fit: BoxFit.contain),
           ],
         ),
         actions: [

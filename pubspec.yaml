@@ -26,3 +26,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/logo-compleat.jpg
+    - assets/images/logo-servair.jpg
