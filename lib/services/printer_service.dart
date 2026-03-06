@@ -6,7 +6,29 @@ class PrinterService {
 
   static Future<String> getPrinterIp() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('printer_ip') ?? '';
+    return prefs.getString('printer_ip') ?? '192.168.2.181';
+  }
+
+  static Future<bool> testConnection({required String printerIp}) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('testConnection', {
+        'printerIp': printerIp,
+      });
+      return result ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  static Future<String> getPrinterStatus({required String printerIp}) async {
+    try {
+      final result = await _channel.invokeMethod<String>('getPrinterStatus', {
+        'printerIp': printerIp,
+      });
+      return result ?? 'OFFLINE';
+    } on PlatformException {
+      return 'OFFLINE';
+    }
   }
 
   static Future<bool> printLabel({
@@ -30,7 +52,7 @@ class PrinterService {
       });
       return result ?? false;
     } on PlatformException catch (e) {
-      print('Print error: \${e.message}');
+      print('Print error: ${e.message}');
       return false;
     }
   }
@@ -39,8 +61,7 @@ class PrinterService {
     try {
       final result = await _channel.invokeListMethod<String>('discoverPrinters');
       return result ?? [];
-    } on PlatformException catch (e) {
-      print('Discovery error: \${e.message}');
+    } on PlatformException {
       return [];
     }
   }

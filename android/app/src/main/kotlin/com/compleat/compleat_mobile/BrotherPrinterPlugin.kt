@@ -54,6 +54,46 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
+            "getPrinterStatus" -> {
+                val printerIp = call.argument<String>("printerIp") ?: ""
+                if (printerIp.isEmpty()) {
+                    result.success("OFFLINE")
+                    return
+                }
+                scope.launch {
+                    try {
+                        val statusStr = withContext(Dispatchers.IO) {
+                            try {
+                                val socket = java.net.Socket()
+                                socket.connect(java.net.InetSocketAddress(printerIp, 9100), 3000)
+                                socket.close()
+                                val printer = Printer()
+                                printer.startCommunication()
+                                val printerInfo = PrinterInfo()
+                                printerInfo.printerModel = PrinterInfo.Model.QL_1110NWB
+                                printerInfo.port = PrinterInfo.Port.NET
+                                printerInfo.ipAddress = printerIp
+                                printer.setPrinterInfo(printerInfo)
+                                val status = printer.getPrinterStatus()
+                                printer.endCommunication()
+                                when (status.errorCode) {
+                                    PrinterInfo.ErrorCode.ERROR_NONE -> "READY"
+                                    PrinterInfo.ErrorCode.ERROR_COVER_OPEN -> "COVER_OPEN"
+                                    PrinterInfo.ErrorCode.ERROR_PAPER_EMPTY -> "NO_PAPER"
+                                    PrinterInfo.ErrorCode.ERROR_PAPER_JAM -> "PAPER_JAM"
+                                    PrinterInfo.ErrorCode.ERROR_COMMUNICATION_ERROR -> "COMM_ERROR"
+                                    else -> "ERROR"
+                                }
+                            } catch (e: Exception) {
+                                "OFFLINE"
+                            }
+                        }
+                        withContext(Dispatchers.Main) { result.success(statusStr) }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { result.success("OFFLINE") }
+                    }
+                }
+            }
             "testConnection" -> {
                 val printerIp = call.argument<String>("printerIp") ?: ""
                 if (printerIp.isEmpty()) {
