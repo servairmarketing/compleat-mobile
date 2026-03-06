@@ -54,6 +54,23 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
+            "testConnection" -> {
+                val printerIp = call.argument<String>("printerIp") ?: ""
+                if (printerIp.isEmpty()) {
+                    result.error("NO_IP", "Printer IP not configured", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val reachable = withContext(Dispatchers.IO) {
+                            java.net.InetAddress.getByName(printerIp).isReachable(3000)
+                        }
+                        withContext(Dispatchers.Main) { result.success(reachable) }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { result.success(false) }
+                    }
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -64,7 +81,6 @@ class BrotherPrinterPlugin(
         quantity: Int, printerIp: String
     ): Boolean = withContext(Dispatchers.IO) {
         val printer = Printer()
-        printer.startCommunication()
         val printerInfo = PrinterInfo()
         printerInfo.printerModel = PrinterInfo.Model.QL_1110NWB
         printerInfo.port = PrinterInfo.Port.NET
@@ -77,7 +93,6 @@ class BrotherPrinterPlugin(
         printer.setPrinterInfo(printerInfo)
         val bitmap = createLabelBitmap(productId, productName, parentRollId1, parentRollId2)
         val status = printer.printImage(bitmap)
-        printer.endCommunication()
         status.errorCode == PrinterInfo.ErrorCode.ERROR_NONE
     }
 

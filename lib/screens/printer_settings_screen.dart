@@ -22,7 +22,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
 
   Future<void> _loadIp() async {
     final prefs = await SharedPreferences.getInstance();
-    _ipController.text = prefs.getString('printer_ip') ?? '192.168.1.100';
+    _ipController.text = prefs.getString('printer_ip') ?? '192.168.2.181';
   }
 
   Future<void> _saveIp() async {
@@ -32,8 +32,18 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   }
 
   Future<void> _testPrint() async {
-    setState(() { _testing = true; _message = null; });
+    setState(() { _testing = true; _message = 'Connecting to printer...'; _messageSuccess = true; });
     final ip = _ipController.text.trim();
+    final reachable = await PrinterService.testConnection(printerIp: ip);
+    if (!reachable) {
+      setState(() {
+        _testing = false;
+        _message = 'Cannot reach printer at $ip. Check IP and WiFi connection.';
+        _messageSuccess = false;
+      });
+      return;
+    }
+    setState(() { _message = 'Printer found! Sending test print...'; });
     final success = await PrinterService.printLabel(
       productId: 'TEST-001',
       productName: 'Test Label',
@@ -43,7 +53,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     );
     setState(() {
       _testing = false;
-      _message = success ? 'Test print sent successfully!' : 'Print failed. Check IP and printer connection.';
+      _message = success ? 'Test print sent successfully!' : 'Printer reached but print failed. Check paper/ink.';
       _messageSuccess = success;
     });
   }
@@ -77,7 +87,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
               style: const TextStyle(fontSize: 18),
               decoration: const InputDecoration(
                 labelText: 'Printer IP Address',
-                hintText: '192.168.1.100',
+                hintText: '192.168.2.181',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.print, size: 28),
                 contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
