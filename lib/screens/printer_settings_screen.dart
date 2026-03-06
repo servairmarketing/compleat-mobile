@@ -35,11 +35,11 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     setState(() { _testing = true; _message = null; });
     final ip = _ipController.text.trim();
     final success = await PrinterService.printLabel(
-      printerIp: ip,
-      productId: 'BSR-607800',
-      productName: 'Test Product',
-      parentRollId: 'TEST-001',
+      productId: 'TEST-001',
+      productName: 'Test Label',
+      parentRollId1: 'TEST-ROLL',
       quantity: 1,
+      printerIp: ip,
     );
     setState(() {
       _testing = false;

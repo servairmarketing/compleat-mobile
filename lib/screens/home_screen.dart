@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'printer_settings_screen.dart';
 import '../services/api_service.dart';
 import 'login_screen.dart';
 import 'receive_screen.dart';
@@ -86,6 +87,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.white, size: 28),
+            tooltip: 'Printer Settings',
+            onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const PrinterSettingsScreen())),
+          ),
           if (_userProfile != null)
             Padding(
               padding: const EdgeInsets.only(right: 4),
