@@ -13,6 +13,6 @@ class MainActivity : FlutterActivity() {
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.compleat/printer"
-        ).setMethodCallHandler(BrotherPrinterPlugin(scope))
+        ).setMethodCallHandler(BrotherPrinterPlugin(applicationContext, scope))
     }
 }
