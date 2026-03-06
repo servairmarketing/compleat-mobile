@@ -60,7 +60,7 @@ class BrotherPrinterPlugin(private val scope: CoroutineScope) : MethodChannel.Me
         try {
             val printer = Printer()
             val printerInfo = PrinterInfo()
-            printerInfo.printerModel = PrinterInfo.Model.QL_1110NWBc
+            printerInfo.printerModel = PrinterInfo.Model.QL_1110NWB
             printerInfo.port = PrinterInfo.Port.NET
             printerInfo.ipAddress = printerIp
             printerInfo.labelNameIndex = LabelInfo.QL700.W62.ordinal
@@ -130,7 +130,7 @@ class BrotherPrinterPlugin(private val scope: CoroutineScope) : MethodChannel.Me
     private suspend fun discoverPrinters(): List<String> = withContext(Dispatchers.IO) {
         try {
             val printer = Printer()
-            val netPrinters: Array<NetPrinter> = printer.getNetPrinters(PrinterInfo.Model.QL_1110NWBc.name)
+            val netPrinters: Array<NetPrinter> = printer.getNetPrinters(PrinterInfo.Model.QL_1110NWB.name)
             netPrinters.map { "${it.ipAddress} (${it.modelName})" }
         } catch (e: Exception) {
             emptyList()
