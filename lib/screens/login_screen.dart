@@ -40,9 +40,10 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.inventory_2, color: Colors.white, size: 80),
-                const SizedBox(height: 16),
-                const Text('Com-Pleat IMS', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                Image.asset('assets/images/logo-compleat.jpg', height: 50, fit: BoxFit.contain),
+                const SizedBox(height: 10),
+                Image.asset('assets/images/logo-servair.jpg', height: 50, fit: BoxFit.contain),
+                const SizedBox(height: 8),
                 const Text('Warehouse', style: TextStyle(color: Colors.white70, fontSize: 18)),
                 const SizedBox(height: 48),
                 Card(
