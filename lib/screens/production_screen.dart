@@ -268,9 +268,9 @@ class _ProductionScreenState extends State<ProductionScreen>
           ],
           const SizedBox(height: 12),
           DropdownSearch<String>(
-            items: _products.map((p) => '\${p['product_id']} — \${p['product_name']}').toList(),
+            items: _products.map((p) => '${p['product_id']} — ${p['product_name']}').toList(),
             selectedItem: _lpSelectedProduct != null && _products.any((p) => p['product_id'] == _lpSelectedProduct)
-                ? '\$_lpSelectedProduct — \${_products.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
+                ? '$_lpSelectedProduct — ${_products.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
                 : null,
             dropdownDecoratorProps: const DropDownDecoratorProps(
               dropdownSearchDecoration: InputDecoration(
