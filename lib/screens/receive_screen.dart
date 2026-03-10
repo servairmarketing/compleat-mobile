@@ -37,6 +37,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   Future<void> _loadMasters() async {
     setState(() => _loading = true);
+    try {
     final vRes = await ApiService.get('/masters/vendors');
     final pRes = await ApiService.get('/masters/products');
 
@@ -84,6 +85,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       }
     }
     setState(() => _loading = false);
+    } catch (e) {
+      setState(() => _loading = false);
+    }
   }
 
   Future<void> _submit() async {
