@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'login_screen.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -69,6 +70,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       if (cached != null) setState(() => _products = List<Map>.from(jsonDecode(cached)));
     }
     setState(() => _loading = false);
+    // session expiry handled by ApiService redirect
   }
 
   void _showMessage(String msg, bool success) {
@@ -539,6 +541,5 @@ class _ProductionScreenState extends State<ProductionScreen>
         contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
       ),
     );
-  }
   }
 }

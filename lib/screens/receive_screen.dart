@@ -3,6 +3,7 @@ import 'package:dropdown_search/dropdown_search.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
+import 'login_screen.dart';
 
 class ReceiveScreen extends StatefulWidget {
   const ReceiveScreen({super.key});
@@ -41,6 +42,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final vRes = await ApiService.get('/masters/vendors');
     final pRes = await ApiService.get('/masters/products');
 
+    if (vRes['error'] == 'session_expired' || pRes['error'] == 'session_expired') {
+      if (mounted) Navigator.pushReplacement(context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()));
+      return;
+    }
     if (vRes['records'] != null) {
       await LocalDb.cacheMasters('vendors', jsonEncode(vRes['records']));
       setState(() => _vendors = List<Map>.from(vRes['records']));

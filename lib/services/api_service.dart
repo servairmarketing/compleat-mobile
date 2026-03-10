@@ -44,6 +44,10 @@ class ApiService {
         },
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'detail': 'session_expired'};
+      }
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'detail': e.toString()};
@@ -60,6 +64,10 @@ class ApiService {
           if (token != null) 'Authorization': 'Bearer $token',
         },
       ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 401) {
+        await logout();
+        return {'error': 'session_expired'};
+      }
       return jsonDecode(response.body);
     } catch (e) {
       return {'error': e.toString()};

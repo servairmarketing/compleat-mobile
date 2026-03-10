@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'login_screen.dart';
 import '../services/api_service.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -44,6 +45,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     setState(() => _loading = false);
+    // session expiry handled by ApiService redirect
   }
 
   @override
@@ -257,6 +259,5 @@ class _HistoryScreenState extends State<HistoryScreen> {
         );
       },
     );
-  }
   }
 }
