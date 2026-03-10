@@ -52,18 +52,27 @@ class BrotherPrinterPlugin(
                     try {
                         val statusStr = withContext(Dispatchers.IO) {
                             try {
+                                // Quick TCP check first - short timeout
                                 val socket = java.net.Socket()
-                                socket.connect(java.net.InetSocketAddress(printerIp, 9100), 2000)
+                                socket.connect(java.net.InetSocketAddress(printerIp, 9100), 1500)
                                 socket.close()
-                                val channel = Channel.newWifiChannel(printerIp)
-                                val generateResult = PrinterDriverGenerator.openChannel(channel)
-                                if (generateResult.error.code != OpenChannelError.ErrorCode.NoError) {
-                                    "OFFLINE"
-                                } else {
-                                    val driver = generateResult.driver
-                                    val statusResult = driver.getPrinterStatus()
-                                    driver.closeChannel()
-                                    if (statusResult.error.code.toString() == "NoError") "READY" else "ERROR"
+                                // Printer is reachable - try SDK status
+                                try {
+                                    val channel = Channel.newWifiChannel(printerIp)
+                                    val generateResult = PrinterDriverGenerator.openChannel(channel)
+                                    if (generateResult.error.code != OpenChannelError.ErrorCode.NoError) {
+                                        "READY" // reachable via TCP but SDK couldn't open - treat as ready
+                                    } else {
+                                        val driver = generateResult.driver
+                                        try {
+                                            val statusResult = driver.getPrinterStatus()
+                                            if (statusResult.error.code.toString() == "NoError") "READY" else "ERROR"
+                                        } finally {
+                                            try { driver.closeChannel() } catch (e: Exception) {}
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    "READY" // TCP worked so printer is there, SDK failed - treat as ready
                                 }
                             } catch (e: Exception) {
                                 "OFFLINE"

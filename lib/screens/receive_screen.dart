@@ -147,6 +147,13 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0d1117),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1c2128),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Receive Parent Roll', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
       body: _loading
         ? const Center(child: CircularProgressIndicator())
         : SingleChildScrollView(

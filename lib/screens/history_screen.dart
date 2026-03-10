@@ -48,6 +48,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0d1117),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1c2128),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text('History', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
+      body: _innerBuild(context),
+    );
+  }
+
+  Widget _innerBuild(BuildContext context) {
     return _loading
         ? const Center(child: CircularProgressIndicator())
         : Column(
@@ -244,5 +257,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         );
       },
     );
+  }
   }
 }

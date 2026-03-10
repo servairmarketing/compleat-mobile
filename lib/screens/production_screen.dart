@@ -207,6 +207,19 @@ class _ProductionScreenState extends State<ProductionScreen>
   // ── Build ──────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0d1117),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1c2128),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text('Production', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
+      body: _innerBuild(context),
+    );
+  }
+
+  Widget _innerBuild(BuildContext context) {
     return _loading
       ? const Center(child: CircularProgressIndicator())
       : Column(
@@ -526,5 +539,6 @@ class _ProductionScreenState extends State<ProductionScreen>
         contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
       ),
     );
+  }
   }
 }
