@@ -3,10 +3,12 @@ package com.compleat.compleat_mobile
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class MainActivity : FlutterActivity() {
-    private val scope = MainScope()
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
