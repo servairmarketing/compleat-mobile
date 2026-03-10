@@ -19,9 +19,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   final _notesController = TextEditingController();
 
   List<Map> _vendors = [];
-  List<Map> _products = [];
+  List<String> _materialTypes = [];
+  List<String> _basisWeights = [];
   String? _selectedVendor;
-  String? _selectedProduct;
+  String? _selectedMaterialType;
+  String? _selectedBasisWeight;
   bool _loading = false;
   bool _submitting = false;
   String? _message;
@@ -37,6 +39,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     setState(() => _loading = true);
     final vRes = await ApiService.get('/masters/vendors');
     final pRes = await ApiService.get('/masters/products');
+
     if (vRes['records'] != null) {
       await LocalDb.cacheMasters('vendors', jsonEncode(vRes['records']));
       setState(() => _vendors = List<Map>.from(vRes['records']));
@@ -44,27 +47,69 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       final cached = await LocalDb.getCachedMasters('vendors');
       if (cached != null) setState(() => _vendors = List<Map>.from(jsonDecode(cached)));
     }
+
     if (pRes['records'] != null) {
       await LocalDb.cacheMasters('products', jsonEncode(pRes['records']));
-      setState(() => _products = List<Map>.from(pRes['records']));
+      final products = List<Map>.from(pRes['records']);
+      final matTypes = products
+          .map((p) => p['material_type']?.toString() ?? '')
+          .where((v) => v.isNotEmpty)
+          .toSet().toList()..sort();
+      final basisWts = products
+          .map((p) => p['basis_weight']?.toString() ?? '')
+          .where((v) => v.isNotEmpty)
+          .toSet().toList()
+          ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
+      setState(() {
+        _materialTypes = matTypes;
+        _basisWeights = basisWts;
+      });
     } else {
       final cached = await LocalDb.getCachedMasters('products');
-      if (cached != null) setState(() => _products = List<Map>.from(jsonDecode(cached)));
+      if (cached != null) {
+        final products = List<Map>.from(jsonDecode(cached));
+        final matTypes = products
+            .map((p) => p['material_type']?.toString() ?? '')
+            .where((v) => v.isNotEmpty)
+            .toSet().toList()..sort();
+        final basisWts = products
+            .map((p) => p['basis_weight']?.toString() ?? '')
+            .where((v) => v.isNotEmpty)
+            .toSet().toList()
+            ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
+        setState(() {
+          _materialTypes = matTypes;
+          _basisWeights = basisWts;
+        });
+      }
     }
     setState(() => _loading = false);
   }
 
   Future<void> _submit() async {
-    if (_rollIdController.text.trim().isEmpty || _selectedVendor == null || _selectedProduct == null) {
-      setState(() { _message = 'Roll ID, Vendor and Product are required.'; _messageSuccess = false; });
+    if (_selectedVendor == null || _selectedMaterialType == null || _selectedBasisWeight == null) {
+      setState(() {
+        _message = 'Vendor, Material Type and Basis Weight are required.';
+        _messageSuccess = false;
+      });
+      return;
+    }
+    if (_widthController.text.trim().isEmpty ||
+        _lengthController.text.trim().isEmpty ||
+        _weightController.text.trim().isEmpty) {
+      setState(() {
+        _message = 'Width, Length and Weight are required.';
+        _messageSuccess = false;
+      });
       return;
     }
     setState(() => _submitting = true);
     final payload = {
-      'roll_id': _rollIdController.text.trim(),
+      'roll_id': _rollIdController.text.trim().isEmpty ? null : _rollIdController.text.trim(),
       'vendor_id': _selectedVendor,
-      'product_id': _selectedProduct,
       'po_number': _poController.text.trim(),
+      'material_type': _selectedMaterialType,
+      'basis_weight': double.tryParse(_selectedBasisWeight!),
       'width': double.tryParse(_widthController.text),
       'length': double.tryParse(_lengthController.text),
       'weight': double.tryParse(_weightController.text),
@@ -72,7 +117,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     };
     final res = await ApiService.post('/rolls/receive', payload);
     if (res['success'] == true) {
-      setState(() { _message = 'Roll ${_rollIdController.text.trim()} received!'; _messageSuccess = true; });
+      final id = res['roll_id'] ?? _rollIdController.text.trim();
+      setState(() { _message = 'Roll $id received successfully!'; _messageSuccess = true; });
       _clearForm();
     } else {
       setState(() { _message = res['detail'] ?? 'Error submitting.'; _messageSuccess = false; });
@@ -87,7 +133,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _lengthController.clear();
     _weightController.clear();
     _notesController.clear();
-    setState(() { _selectedVendor = null; _selectedProduct = null; });
+    setState(() {
+      _selectedVendor = null;
+      _selectedMaterialType = null;
+      _selectedBasisWeight = null;
+    });
   }
 
   @override
@@ -114,33 +164,62 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       color: _messageSuccess ? Colors.green[800] : Colors.red[800],
                       fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
-                _buildField('Roll ID / Barcode *', _rollIdController, autofocus: true),
+
+                _buildField('Roll ID', _rollIdController,
+                    hint: 'Auto-generated if empty', autofocus: true),
                 const SizedBox(height: 14),
-                _buildDropdown('Vendor *', _vendors, 'vendor_id', 'vendor_name', _selectedVendor, (v) => setState(() => _selectedVendor = v)),
+
+                _buildVendorDropdown(),
                 const SizedBox(height: 14),
-                _buildDropdown('Product *', _products, 'product_id', 'product_name', _selectedProduct, (v) => setState(() => _selectedProduct = v)),
-                const SizedBox(height: 14),
+
                 _buildField('PO Number', _poController),
                 const SizedBox(height: 14),
+
+                _buildSimpleDropdown(
+                  label: 'Material Type *',
+                  items: _materialTypes,
+                  value: _selectedMaterialType,
+                  onChanged: (v) => setState(() => _selectedMaterialType = v),
+                ),
+                const SizedBox(height: 14),
+
+                _buildSimpleDropdown(
+                  label: 'Basis Weight *',
+                  items: _basisWeights,
+                  value: _selectedBasisWeight,
+                  onChanged: (v) => setState(() => _selectedBasisWeight = v),
+                ),
+                const SizedBox(height: 14),
+
                 Row(children: [
-                  Expanded(child: _buildField('Width (in)', _widthController, numeric: true)),
+                  Expanded(child: _buildField('Width (in) *', _widthController, numeric: true)),
                   const SizedBox(width: 12),
-                  Expanded(child: _buildField('Length (ft)', _lengthController, numeric: true)),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildField('Weight (lbs)', _weightController, numeric: true)),
+                  Expanded(child: _buildField('Length (ft) *', _lengthController, numeric: true)),
                 ]),
                 const SizedBox(height: 14),
+
+                _buildField('Weight (lbs) *', _weightController,
+                    numeric: true, hint: 'Overall weight of the roll'),
+                const SizedBox(height: 14),
+
                 _buildField('Notes', _notesController),
                 const SizedBox(height: 24),
+
                 Row(children: [
                   Expanded(
                     child: SizedBox(
                       height: 56,
                       child: ElevatedButton.icon(
                         onPressed: _submitting ? null : _submit,
-                        icon: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.download_rounded, size: 24),
-                        label: Text(_submitting ? 'Saving...' : 'Receive Roll', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                        icon: _submitting
+                          ? const SizedBox(width: 20, height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.download_rounded, size: 24),
+                        label: Text(_submitting ? 'Saving...' : 'Receive Roll',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1a73e8),
+                          foregroundColor: Colors.white),
                       ),
                     ),
                   ),
@@ -159,42 +238,44 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
-  Widget _buildField(String label, TextEditingController controller, {bool numeric = false, bool autofocus = false}) {
+  Widget _buildField(String label, TextEditingController controller,
+      {bool numeric = false, bool autofocus = false, String? hint}) {
     return TextField(
       controller: controller,
       autofocus: autofocus,
-      keyboardType: numeric ? TextInputType.number : TextInputType.text,
+      keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,
+        hintText: hint,
         border: const OutlineInputBorder(),
         contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
       ),
     );
   }
 
-  Widget _buildDropdown(String label, List<Map> items, String idKey, String nameKey, String? value, Function(String?) onChanged) {
-    final itemList = items.map((item) => '${item[idKey]} — ${item[nameKey]}').toList();
-    final selectedItem = value != null
-        ? items.where((i) => i[idKey]?.toString() == value).isNotEmpty
-            ? '${items.firstWhere((i) => i[idKey]?.toString() == value)[idKey]} — ${items.firstWhere((i) => i[idKey]?.toString() == value)[nameKey]}'
+  Widget _buildVendorDropdown() {
+    final itemList = _vendors.map((v) => '${v['vendor_id']} — ${v['vendor_name']}').toList();
+    final selectedItem = _selectedVendor != null
+        ? _vendors.where((v) => v['vendor_id']?.toString() == _selectedVendor).isNotEmpty
+            ? '${_selectedVendor} — ${_vendors.firstWhere((v) => v['vendor_id']?.toString() == _selectedVendor)['vendor_name']}'
             : null
         : null;
     return DropdownSearch<String>(
       items: itemList,
       selectedItem: selectedItem,
-      dropdownDecoratorProps: DropDownDecoratorProps(
+      dropdownDecoratorProps: const DropDownDecoratorProps(
         dropdownSearchDecoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+          labelText: 'Vendor *',
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 14),
         ),
       ),
       popupProps: PopupProps.menu(
         showSearchBox: true,
         searchFieldProps: const TextFieldProps(
           decoration: InputDecoration(
-            hintText: 'Type to search...',
+            hintText: 'Search vendors...',
             border: OutlineInputBorder(),
             contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           ),
@@ -211,10 +292,41 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         ),
       ),
       onChanged: (val) {
-        if (val == null) { onChanged(null); return; }
-        final id = val.split(' — ')[0];
-        onChanged(id);
+        if (val == null) { setState(() => _selectedVendor = null); return; }
+        setState(() => _selectedVendor = val.split(' — ')[0]);
       },
+    );
+  }
+
+  Widget _buildSimpleDropdown({
+    required String label,
+    required List<String> items,
+    required String? value,
+    required Function(String?) onChanged,
+  }) {
+    return DropdownSearch<String>(
+      items: items,
+      selectedItem: value,
+      dropdownDecoratorProps: DropDownDecoratorProps(
+        dropdownSearchDecoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+        ),
+      ),
+      popupProps: PopupProps.menu(
+        showSearchBox: items.length > 5,
+        constraints: const BoxConstraints(maxHeight: 250),
+        itemBuilder: (context, item, isSelected) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Text(item, style: TextStyle(
+            fontSize: 16,
+            color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          )),
+        ),
+      ),
+      onChanged: onChanged,
     );
   }
 }
