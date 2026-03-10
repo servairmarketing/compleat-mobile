@@ -49,39 +49,17 @@ class BrotherPrinterPlugin(
                 val printerIp = call.argument<String>("printerIp") ?: ""
                 if (printerIp.isEmpty()) { result.success("OFFLINE"); return }
                 scope.launch {
-                    try {
-                        val statusStr = withContext(Dispatchers.IO) {
-                            try {
-                                // Quick TCP check first - short timeout
-                                val socket = java.net.Socket()
-                                socket.connect(java.net.InetSocketAddress(printerIp, 9100), 1500)
-                                socket.close()
-                                // Printer is reachable - try SDK status
-                                try {
-                                    val channel = Channel.newWifiChannel(printerIp)
-                                    val generateResult = PrinterDriverGenerator.openChannel(channel)
-                                    if (generateResult.error.code != OpenChannelError.ErrorCode.NoError) {
-                                        "READY" // reachable via TCP but SDK couldn't open - treat as ready
-                                    } else {
-                                        val driver = generateResult.driver
-                                        try {
-                                            val statusResult = driver.getPrinterStatus()
-                                            if (statusResult.error.code.toString() == "NoError") "READY" else "ERROR"
-                                        } finally {
-                                            try { driver.closeChannel() } catch (e: Exception) {}
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    "READY" // TCP worked so printer is there, SDK failed - treat as ready
-                                }
-                            } catch (e: Exception) {
-                                "OFFLINE"
-                            }
+                    val statusStr = withContext(Dispatchers.IO) {
+                        try {
+                            val socket = java.net.Socket()
+                            socket.connect(java.net.InetSocketAddress(printerIp, 9100), 2000)
+                            socket.close()
+                            "READY"
+                        } catch (e: Exception) {
+                            "OFFLINE"
                         }
-                        withContext(Dispatchers.Main) { result.success(statusStr) }
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) { result.success("OFFLINE") }
                     }
+                    withContext(Dispatchers.Main) { result.success(statusStr) }
                 }
             }
             "testConnection" -> {
