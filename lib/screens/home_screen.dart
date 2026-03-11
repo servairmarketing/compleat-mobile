@@ -44,34 +44,35 @@ class _HomeScreenState extends State<HomeScreen> {
     final isAdmin = role == 'admin';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0d1117),
+      backgroundColor: Colors.grey[100],
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: const Color(0xFF1c2128),
+              color: const Color(0xFF1a73e8),
               child: Row(
                 children: [
-                  Image.asset('assets/images/logo-compleat.jpg', height: 36, fit: BoxFit.contain),
-                  const SizedBox(width: 8),
-                  Container(width: 1, height: 28, color: Colors.white24),
-                  const SizedBox(width: 8),
-                  Image.asset('assets/images/logo-servair.jpg', height: 36, fit: BoxFit.contain),
+                  Image.asset('assets/images/ComPleat_Logo_Mark.png',
+                      height: 36, fit: BoxFit.contain),
+                  const SizedBox(width: 12),
+                  const Text('Com-Pleat IMS',
+                      style: TextStyle(color: Colors.white, fontSize: 16,
+                          fontWeight: FontWeight.bold)),
                   const Spacer(),
                   if (name.isNotEmpty)
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(name, style: const TextStyle(
-                            color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                        Text(role, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                        Text(name, style: const TextStyle(color: Colors.white,
+                            fontSize: 13, fontWeight: FontWeight.bold)),
+                        Text(role, style: const TextStyle(
+                            color: Colors.white70, fontSize: 11)),
                       ],
                     ),
                   const SizedBox(width: 8),
                   IconButton(
-                    icon: const Icon(Icons.logout, color: Colors.white54, size: 22),
+                    icon: const Icon(Icons.logout, color: Colors.white70, size: 22),
                     onPressed: _logout,
                     tooltip: 'Logout',
                     padding: EdgeInsets.zero,
@@ -80,8 +81,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-
-            // Body
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
@@ -89,42 +88,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 8),
-                    const Text('Warehouse Operations',
-                        style: TextStyle(color: Colors.white54, fontSize: 13,
-                            letterSpacing: 1.0, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 16),
-
-                    // Menu cards grid
+                    const Text('WAREHOUSE OPERATIONS',
+                        style: TextStyle(color: Colors.black54, fontSize: 12,
+                            letterSpacing: 1.2, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 14),
                     if (modules.contains('receive') || isAdmin)
-                      _MenuCard(
-                        icon: Icons.download_rounded,
-                        label: 'Receive',
-                        description: 'Receive incoming parent rolls',
-                        color: const Color(0xFF1a73e8),
-                        onTap: () => _navigate(const ReceiveScreen()),
-                      ),
+                      _MenuCard(icon: Icons.download_rounded, label: 'Receive',
+                          description: 'Receive incoming parent rolls',
+                          color: const Color(0xFF1a73e8),
+                          onTap: () => _navigate(const ReceiveScreen())),
                     if (modules.contains('production') || isAdmin)
-                      _MenuCard(
-                        icon: Icons.precision_manufacturing,
-                        label: 'Production',
-                        description: 'Start a production run',
-                        color: const Color(0xFF0f9d58),
-                        onTap: () => _navigate(const ProductionScreen()),
-                      ),
-                    _MenuCard(
-                      icon: Icons.history_rounded,
-                      label: 'History',
-                      description: 'View recent transactions',
-                      color: const Color(0xFFf4b400),
-                      onTap: () => _navigate(const HistoryScreen()),
-                    ),
-                    _MenuCard(
-                      icon: Icons.print_rounded,
-                      label: 'Printer Settings',
-                      description: 'Configure label printer',
-                      color: const Color(0xFFe53935),
-                      onTap: () => _navigate(const PrinterSettingsScreen()),
-                    ),
+                      _MenuCard(icon: Icons.precision_manufacturing, label: 'Production',
+                          description: 'Start a production run',
+                          color: const Color(0xFF0f9d58),
+                          onTap: () => _navigate(const ProductionScreen())),
+                    _MenuCard(icon: Icons.history_rounded, label: 'History',
+                        description: 'View recent transactions',
+                        color: const Color(0xFFf4b400),
+                        onTap: () => _navigate(const HistoryScreen())),
+                    _MenuCard(icon: Icons.print_rounded, label: 'Printer Settings',
+                        description: 'Configure label printer',
+                        color: const Color(0xFFe53935),
+                        onTap: () => _navigate(const PrinterSettingsScreen())),
                   ],
                 ),
               ),
@@ -142,22 +127,17 @@ class _MenuCard extends StatelessWidget {
   final String description;
   final Color color;
   final VoidCallback onTap;
-
-  const _MenuCard({
-    required this.icon,
-    required this.label,
-    required this.description,
-    required this.color,
-    required this.onTap,
-  });
+  const _MenuCard({required this.icon, required this.label,
+      required this.description, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Material(
-        color: const Color(0xFF1c2128),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
+        elevation: 1,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
@@ -166,29 +146,24 @@ class _MenuCard extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: 52, height: 52,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      color: color.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12)),
                   child: Icon(icon, color: color, size: 28),
                 ),
                 const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: const TextStyle(
-                          color: Colors.white, fontSize: 18,
-                          fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text(description, style: const TextStyle(
-                          color: Colors.white54, fontSize: 14)),
-                    ],
-                  ),
-                ),
-                Icon(Icons.chevron_right, color: Colors.white24, size: 24),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: const TextStyle(color: Colors.black87,
+                        fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text(description, style: const TextStyle(
+                        color: Colors.black54, fontSize: 14)),
+                  ],
+                )),
+                const Icon(Icons.chevron_right, color: Colors.black26, size: 24),
               ],
             ),
           ),

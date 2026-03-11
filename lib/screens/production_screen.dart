@@ -210,9 +210,9 @@ class _ProductionScreenState extends State<ProductionScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0d1117),
+      backgroundColor: const Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1c2128),
+        backgroundColor: const Color(0xFF1a73e8),
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text('Production', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),

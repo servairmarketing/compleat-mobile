@@ -109,6 +109,7 @@ class BrotherPrinterPlugin(
         parentRollId1: String, parentRollId2: String,
         quantity: Int, printerIp: String
     ): Boolean = withContext(Dispatchers.IO) {
+        try { val s=java.net.Socket(); s.connect(java.net.InetSocketAddress(printerIp,9100),3000); s.close() } catch(e:Exception) { throw Exception("Printer unreachable: ${e.message}") }
         val channel = Channel.newWifiChannel(printerIp)
         val generateResult = PrinterDriverGenerator.openChannel(channel)
         if (generateResult.error.code != OpenChannelError.ErrorCode.NoError) {
