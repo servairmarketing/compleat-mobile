@@ -146,6 +146,59 @@ class BrotherPrinterPlugin(
             socket.soTimeout = 15000
             try {
                 val out: OutputStream = socket.getOutputStream()
+                val inp = socket.getInputStream()
+
+                // --- Status request handshake (ESC i S) ---
+                out.write(byteArrayOf(0x1B, 0x69.toByte(), 0x53))
+                out.flush()
+                Log.d("BrotherPrint", "Status request sent (ESC i S)")
+                log.appendLine("statusRequestSent=true")
+
+                socket.soTimeout = 3000
+                val statusBytes = ByteArray(32)
+                val statusDetail: String = try {
+                    var totalRead = 0
+                    while (totalRead < 32) {
+                        val n = inp.read(statusBytes, totalRead, 32 - totalRead)
+                        if (n == -1) break
+                        totalRead += n
+                    }
+                    if (totalRead == 0) {
+                        Log.w("BrotherPrint", "No status response")
+                        log.appendLine("statusResponse=none")
+                        "statusResponse=none"
+                    } else {
+                        val hex = statusBytes.take(totalRead).joinToString(" ") { "%02X".format(it) }
+                        Log.d("BrotherPrint", "Status response ($totalRead bytes): $hex")
+                        log.appendLine("statusRawHex=$hex")
+                        if (totalRead >= 32 && statusBytes[0] == 0x80.toByte()) {
+                            val ei1    = statusBytes[4].toInt()  and 0xFF
+                            val ei2    = statusBytes[5].toInt()  and 0xFF
+                            val width  = statusBytes[6].toInt()  and 0xFF
+                            val mtype  = statusBytes[7].toInt()  and 0xFF
+                            val stype  = statusBytes[11].toInt() and 0xFF
+                            val phase  = statusBytes[12].toInt() and 0xFF
+                            val parsed = "byte[0]=0x80(valid) ei1=0x%02X ei2=0x%02X width=%dmm mediaType=0x%02X statusType=0x%02X phase=0x%02X"
+                                .format(ei1, ei2, width, mtype, stype, phase)
+                            Log.d("BrotherPrint", "Status parsed: $parsed")
+                            log.appendLine("statusParsed=$parsed")
+                            parsed
+                        } else if (totalRead > 0 && statusBytes[0] != 0x80.toByte()) {
+                            Log.w("BrotherPrint", "Invalid status response: byte[0]=0x%02X".format(statusBytes[0]))
+                            log.appendLine("statusResponse=invalid byte[0]=0x%02X".format(statusBytes[0]))
+                            "statusResponse=invalid byte[0]=0x%02X".format(statusBytes[0])
+                        } else {
+                            "statusResponse=partial($totalRead bytes) hex=$hex"
+                        }
+                    }
+                } catch (e: java.net.SocketTimeoutException) {
+                    Log.w("BrotherPrint", "No status response (timeout)")
+                    log.appendLine("statusResponse=timeout")
+                    "statusResponse=timeout"
+                }
+                socket.soTimeout = 15000
+                // --- End status handshake ---
+
                 Log.d("BrotherPrint", "Writing job: ${rasterJob.size} bytes total")
                 out.write(rasterJob)
                 out.flush()
@@ -167,9 +220,9 @@ class BrotherPrinterPlugin(
         }
 
         val detail = if (errorMsg == null) {
-            "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+            "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent\n${log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")}"
         } else {
-            "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+            "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent\n${log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")}"
         }
         log.appendLine("result=$detail")
 
@@ -240,8 +293,9 @@ class BrotherPrinterPlugin(
         // 8. Expanded mode — cut at end — ESC i K 08
         job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
 
-        // 9. Margin = 0 — ESC i d 00 00
-        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x00, 0x00))
+        // 9. Margin = 35 dots (0x23) — ESC i d 23 00
+        //    Spec minimum for continuous roll is 35 dots (≈3 mm)
+        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x23, 0x00))
 
         // 10. No compression — M 00
         job.addAll(byteListOf(0x4D, 0x00))
