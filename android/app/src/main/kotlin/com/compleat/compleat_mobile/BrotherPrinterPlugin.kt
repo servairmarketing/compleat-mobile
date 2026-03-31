@@ -162,8 +162,8 @@ class BrotherPrinterPlugin(
     private fun buildRasterJob(bitmap: Bitmap, copies: Int): ByteArray {
         val rasterRows  = bitmapToRasterRows(bitmap)
         val labelHeight = rasterRows.size
-        val heightLow   = (labelHeight and 0xFF).toByte()
-        val heightHigh  = ((labelHeight shr 8) and 0xFF).toByte()
+        val heightLow   = labelHeight and 0xFF
+        val heightHigh  = (labelHeight shr 8) and 0xFF
 
         val job = mutableListOf<Byte>()
 
