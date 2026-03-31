@@ -26,12 +26,14 @@ class BrotherPrinterPlugin(
 ) : MethodChannel.MethodCallHandler {
 
     // QL-1110NWB has a 1296-pin (162-byte) print head.
-    // W62 tape layout per raster line:
-    //   68 bytes left margin (544 pins) + 87 bytes image (696 pins) + 7 bytes right margin (56 pins) = 162 bytes
-    private val PRINT_WIDTH_PX    = 696
-    private val LEFT_MARGIN_BYTES = 68
-    private val IMAGE_BYTES       = 87   // 696 / 8 = 87 exactly
-    private val BYTES_PER_LINE    = 162  // 1296 / 8 = 162 (full head width)
+    // W62 tape sits 56 pins (7 bytes) from the RIGHT edge of the head.
+    // Byte 0 MSB = rightmost pin → data is right-edge-first.
+    // W62 raster line layout:
+    //   7 bytes right margin (56 pins) + 87 bytes image (696 pins, rightmost pixel first) + 68 bytes left unused (544 pins) = 162 bytes
+    private val PRINT_WIDTH_PX     = 696
+    private val RIGHT_MARGIN_BYTES = 7    // offset_r(12) + additional_offset_r(44) = 56 pins = 7 bytes
+    private val IMAGE_BYTES        = 87   // 696 / 8 = 87 exactly
+    private val BYTES_PER_LINE     = 162  // 1296 / 8 = 162 (full head width)
     private val PRINTER_PORT      = 9100
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -257,8 +259,8 @@ class BrotherPrinterPlugin(
 
         val job = mutableListOf<Byte>()
 
-        // 1. Invalidate — 350 null bytes (spec explicitly says 350)
-        repeat(350) { job.add(0x00) }
+        // 1. Invalidate — 200 null bytes (QL-1110NWB default per brother_ql library / models.py)
+        repeat(200) { job.add(0x00) }
 
         // 2. Initialize — ESC @
         job.addAll(byteListOf(0x1B, 0x40))
@@ -317,8 +319,12 @@ class BrotherPrinterPlugin(
     }
 
     /**
-     * Converts Android Bitmap to 1-bit packed raster rows (MSB first, black=1).
-     * Each row is 162 bytes: 68 bytes left margin + 87 bytes image + 7 bytes right margin.
+     * Converts Android Bitmap to 1-bit packed raster rows for QL-1110NWB.
+     * Each row is 162 bytes. Byte 0 MSB = rightmost pin of the print head.
+     * W62 tape occupies bytes 7–93: RIGHT_MARGIN_BYTES(7) + IMAGE_BYTES(87).
+     * Pixel x=0 (leftmost image pixel) maps to the LAST bit of byte 93;
+     * pixel x=695 (rightmost) maps to the MSB of byte 7 — i.e. the image is
+     * horizontally mirrored in the byte stream so it prints correctly.
      * Scales to PRINT_WIDTH_PX wide if needed.
      */
     private fun bitmapToRasterRows(src: Bitmap): List<ByteArray> {
@@ -339,10 +345,12 @@ class BrotherPrinterPlugin(
                 val b = argb           and 0xFF
                 val lum = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
                 if (lum < 128) {
-                    // Dark pixel → print dot (bit = 1, MSB first)
-                    // Image data starts at byte offset LEFT_MARGIN_BYTES (68)
-                    val byteIdx = LEFT_MARGIN_BYTES + x / 8
-                    rowBytes[byteIdx] = (rowBytes[byteIdx].toInt() or (1 shl (7 - x % 8))).toByte()
+                    // Rightmost image pixel (x=695) → byte 7 MSB; leftmost (x=0) → byte 93 bit 0.
+                    // Mirrors the image so it prints left-to-right on the label.
+                    val mirrored = PRINT_WIDTH_PX - 1 - x
+                    val byteIdx  = RIGHT_MARGIN_BYTES + mirrored / 8
+                    val bitPos   = mirrored % 8
+                    rowBytes[byteIdx] = (rowBytes[byteIdx].toInt() or (1 shl (7 - bitPos))).toByte()
                 }
             }
             rows.add(rowBytes)
