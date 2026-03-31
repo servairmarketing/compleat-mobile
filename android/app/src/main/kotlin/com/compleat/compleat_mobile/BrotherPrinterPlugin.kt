@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.util.Log
 import com.brother.sdk.lmprinter.Channel
 import com.brother.sdk.lmprinter.OpenChannelError
 import com.brother.sdk.lmprinter.PrinterDriverGenerator
@@ -24,11 +25,14 @@ class BrotherPrinterPlugin(
     private val scope: CoroutineScope
 ) : MethodChannel.MethodCallHandler {
 
-    // QL-1110NWB with W62 (62mm) continuous roll:
-    // Printable width = 696 pixels at 300 dpi = 87 bytes per raster line
-    private val PRINT_WIDTH_PX = 696
-    private val BYTES_PER_LINE = 87  // 696 / 8 = 87 exactly
-    private val PRINTER_PORT = 9100
+    // QL-1110NWB has a 1296-pin (162-byte) print head.
+    // W62 tape layout per raster line:
+    //   68 bytes left margin (544 pins) + 87 bytes image (696 pins) + 7 bytes right margin (56 pins) = 162 bytes
+    private val PRINT_WIDTH_PX   = 696
+    private val LEFT_MARGIN_BYTES = 68
+    private val IMAGE_BYTES       = 87   // 696 / 8 = 87 exactly
+    private val BYTES_PER_LINE    = 162  // 1296 / 8 = 162 (full head width)
+    private val PRINTER_PORT      = 9100
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -126,14 +130,19 @@ class BrotherPrinterPlugin(
 
         val socket = Socket()
         socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
+        Log.d("BrotherPrint", "Socket connected to $printerIp:$PRINTER_PORT")
         socket.soTimeout = 15000
         try {
             val out: OutputStream = socket.getOutputStream()
+            Log.d("BrotherPrint", "Writing job: ${rasterJob.size} bytes total")
             out.write(rasterJob)
             out.flush()
-            Thread.sleep(500)
+            Log.d("BrotherPrint", "Data flushed")
+            Thread.sleep(2000)
+            Log.d("BrotherPrint", "Drain sleep done")
         } finally {
             socket.close()
+            Log.d("BrotherPrint", "Socket closed")
         }
         true
     }
@@ -141,21 +150,13 @@ class BrotherPrinterPlugin(
     /**
      * Builds the complete binary raster job per the official QL-1100/1110NWB spec.
      *
-     * FIXES applied vs previous version:
-     *  1. Invalidate = 350 null bytes (spec says 350, not 200)
-     *  2. ESC i z sends exactly 10 bytes of parameters (not 13)
-     *  3. No 'Z' zero-raster command — only valid in TIFF mode.
-     *     Every row is sent as a full 'g' raster line, even blank ones.
-     *
      * ESC i z parameter layout (10 bytes):
      *   [0] flags     0x8E  — marks media type + width + length + quality valid
      *   [1] media     0x0A  — continuous roll (not die-cut)
      *   [2] width mm  62    — W62 label
      *   [3] length mm 0     — 0 = continuous (no fixed length)
-     *   [4] raster lines low byte
-     *   [5] raster lines high byte
-     *   [6] page number (1-based)
-     *   [7] page count total
+     *   [4-7] raster line count as 4-byte little-endian uint32
+     *         e.g. 270 lines → n5=0x0E, n6=0x01, n7=0x00, n8=0x00
      *   [8] color     0x00
      *   [9] reserved  0x00
      */
@@ -186,10 +187,10 @@ class BrotherPrinterPlugin(
             0x0A,       // media type: continuous roll
             62,         // width: 62 mm
             0x00,       // length: 0 = continuous
-            heightLow,  // raster line count LSB
-            heightHigh, // raster line count MSB
-            0x01,       // page number (1)
-            0x01,       // total pages (1)
+            heightLow,  // n5: raster line count byte 0 (LSB)
+            heightHigh, // n6: raster line count byte 1
+            0x00,       // n7: raster line count byte 2
+            0x00,       // n8: raster line count byte 3 (MSB)
             0x00,       // color
             0x00        // reserved
         ))
@@ -215,8 +216,8 @@ class BrotherPrinterPlugin(
                 // Always send full 'g' raster line — 'Z' is only valid in TIFF mode
                 job.add(0x67)                      // 'g' command
                 job.add(0x00)                      // fixed 0x00
-                job.add(BYTES_PER_LINE.toByte())   // data length = 87
-                row.forEach { job.add(it) }        // 87 bytes of pixel data
+                job.add(BYTES_PER_LINE.toByte())   // data length = 162 (0xA2)
+                row.forEach { job.add(it) }        // 162 bytes of pixel data (with margins)
             }
             // 0x0C = FF print (intermediate copies), 0x1A = print+feed (last copy)
             job.add(if (copy < copies) 0x0C else 0x1A)
@@ -227,6 +228,7 @@ class BrotherPrinterPlugin(
 
     /**
      * Converts Android Bitmap to 1-bit packed raster rows (MSB first, black=1).
+     * Each row is 162 bytes: 68 bytes left margin + 87 bytes image + 7 bytes right margin.
      * Scales to PRINT_WIDTH_PX wide if needed.
      */
     private fun bitmapToRasterRows(src: Bitmap): List<ByteArray> {
@@ -239,7 +241,7 @@ class BrotherPrinterPlugin(
 
         for (y in 0 until bmp.height) {
             bmp.getPixels(pixels, 0, PRINT_WIDTH_PX, 0, y, PRINT_WIDTH_PX, 1)
-            val rowBytes = ByteArray(BYTES_PER_LINE)
+            val rowBytes = ByteArray(BYTES_PER_LINE) // 162 bytes, zero-initialised (margins stay 0x00)
             for (x in 0 until PRINT_WIDTH_PX) {
                 val argb = pixels[x]
                 val r = (argb shr 16) and 0xFF
@@ -248,7 +250,9 @@ class BrotherPrinterPlugin(
                 val lum = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
                 if (lum < 128) {
                     // Dark pixel → print dot (bit = 1, MSB first)
-                    rowBytes[x / 8] = (rowBytes[x / 8].toInt() or (1 shl (7 - x % 8))).toByte()
+                    // Image data starts at byte offset LEFT_MARGIN_BYTES (68)
+                    val byteIdx = LEFT_MARGIN_BYTES + x / 8
+                    rowBytes[byteIdx] = (rowBytes[byteIdx].toInt() or (1 shl (7 - x % 8))).toByte()
                 }
             }
             rows.add(rowBytes)
