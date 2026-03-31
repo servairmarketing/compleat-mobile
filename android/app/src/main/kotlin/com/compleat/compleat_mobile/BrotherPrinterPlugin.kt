@@ -28,7 +28,7 @@ class BrotherPrinterPlugin(
     // QL-1110NWB has a 1296-pin (162-byte) print head.
     // W62 tape layout per raster line:
     //   68 bytes left margin (544 pins) + 87 bytes image (696 pins) + 7 bytes right margin (56 pins) = 162 bytes
-    private val PRINT_WIDTH_PX   = 696
+    private val PRINT_WIDTH_PX    = 696
     private val LEFT_MARGIN_BYTES = 68
     private val IMAGE_BYTES       = 87   // 696 / 8 = 87 exactly
     private val BYTES_PER_LINE    = 162  // 1296 / 8 = 162 (full head width)
@@ -47,16 +47,14 @@ class BrotherPrinterPlugin(
                     result.error("NO_IP", "Printer IP not configured", null); return
                 }
                 scope.launch {
-                    try {
-                        val success = printLabelRawTcp(
+                    val detail = try {
+                        printLabelRawTcp(
                             productId, productName, parentRollId1, parentRollId2, quantity, printerIp
                         )
-                        withContext(Dispatchers.Main) { result.success(success) }
                     } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            result.error("PRINT_ERROR", e.message ?: "Unknown error", null)
-                        }
+                        "ERROR: ${e.message ?: "Unknown error"}"
                     }
+                    withContext(Dispatchers.Main) { result.success(detail) }
                 }
             }
             "getPrinterStatus" -> {
@@ -123,28 +121,66 @@ class BrotherPrinterPlugin(
         productId: String, productName: String,
         parentRollId1: String, parentRollId2: String,
         quantity: Int, printerIp: String
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
+        val log = StringBuilder()
+        val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        log.appendLine("=== BrotherPrint debug $ts ===")
+
         val bitmap = createLabelBitmap(productId, productName, parentRollId1, parentRollId2)
         val rasterJob = buildRasterJob(bitmap, quantity)
         bitmap.recycle()
+        log.appendLine("jobBytes=${rasterJob.size}")
+        Log.d("BrotherPrint", "Job built: ${rasterJob.size} bytes")
 
-        val socket = Socket()
-        socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
-        Log.d("BrotherPrint", "Socket connected to $printerIp:$PRINTER_PORT")
-        socket.soTimeout = 15000
+        var socketConnected = false
+        var dataSent = false
+        var errorMsg: String? = null
+
         try {
-            val out: OutputStream = socket.getOutputStream()
-            Log.d("BrotherPrint", "Writing job: ${rasterJob.size} bytes total")
-            out.write(rasterJob)
-            out.flush()
-            Log.d("BrotherPrint", "Data flushed")
-            Thread.sleep(2000)
-            Log.d("BrotherPrint", "Drain sleep done")
-        } finally {
-            socket.close()
-            Log.d("BrotherPrint", "Socket closed")
+            val socket = Socket()
+            socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
+            socketConnected = true
+            Log.d("BrotherPrint", "Socket connected to $printerIp:$PRINTER_PORT")
+            log.appendLine("socketConnected=true  ip=$printerIp:$PRINTER_PORT")
+            socket.soTimeout = 15000
+            try {
+                val out: OutputStream = socket.getOutputStream()
+                Log.d("BrotherPrint", "Writing job: ${rasterJob.size} bytes total")
+                out.write(rasterJob)
+                out.flush()
+                dataSent = true
+                Log.d("BrotherPrint", "Data flushed")
+                log.appendLine("dataSent=true")
+                Thread.sleep(2000)
+                Log.d("BrotherPrint", "Drain sleep done")
+                log.appendLine("drainSleepDone=true")
+            } finally {
+                socket.close()
+                Log.d("BrotherPrint", "Socket closed")
+                log.appendLine("socketClosed=true")
+            }
+        } catch (e: Exception) {
+            errorMsg = e.message ?: "Unknown error"
+            Log.e("BrotherPrint", "Exception: $errorMsg")
+            log.appendLine("error=$errorMsg")
         }
-        true
+
+        val detail = if (errorMsg == null) {
+            "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+        } else {
+            "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+        }
+        log.appendLine("result=$detail")
+
+        // Write debug info to /sdcard/brother_print_debug.txt
+        try {
+            java.io.File("/sdcard/brother_print_debug.txt").writeText(log.toString())
+        } catch (e: Exception) {
+            Log.w("BrotherPrint", "Could not write debug file: ${e.message}")
+        }
+
+        detail
     }
 
     /**

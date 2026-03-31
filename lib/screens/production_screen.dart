@@ -94,7 +94,7 @@ class _ProductionScreenState extends State<ProductionScreen>
     }
 
     setState(() => _lpPrinting = true);
-    final printed = await PrinterService.printLabel(
+    final detail = await PrinterService.printLabel(
       productId: _lpSelectedProduct!,
       productName: _lpSelectedProductName ?? _lpSelectedProduct!,
       parentRollId1: p1,
@@ -103,7 +103,7 @@ class _ProductionScreenState extends State<ProductionScreen>
     );
     setState(() => _lpPrinting = false);
 
-    if (printed) {
+    if (!detail.startsWith('ERROR')) {
       _showMessage('$qty label(s) sent to printer!', true);
     } else {
       _showMessage('Printing failed. Make sure Brother iPrint&Label app is installed.', false);

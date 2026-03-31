@@ -65,14 +65,26 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   Future<void> _testPrint() async {
     setState(() => _printing = true);
     final ip = _ipController.text.trim();
-    final success = await PrinterService.printLabel(
+    final detail = await PrinterService.printLabel(
       productId: 'TEST-001', productName: 'Test Label',
       parentRollId1: 'TEST-ROLL', quantity: 1, printerIp: ip,
     );
     setState(() => _printing = false);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(success ? 'Test print sent!' : 'Print failed. Check printer.'),
-      backgroundColor: success ? Colors.green : Colors.red));
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(detail.startsWith('OK:') ? 'Print Sent' : 'Print Result'),
+          content: SelectableText(detail),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override

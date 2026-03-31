@@ -31,7 +31,7 @@ class PrinterService {
     }
   }
 
-  static Future<bool> printLabel({
+  static Future<String> printLabel({
     required String productId,
     required String productName,
     required String parentRollId1,
@@ -41,8 +41,8 @@ class PrinterService {
   }) async {
     try {
       final ip = printerIp ?? await getPrinterIp();
-      if (ip.isEmpty) return false;
-      final result = await _channel.invokeMethod<bool>('printLabel', {
+      if (ip.isEmpty) return 'ERROR: No printer IP configured';
+      final result = await _channel.invokeMethod<String>('printLabel', {
         'productId': productId,
         'productName': productName,
         'parentRollId1': parentRollId1,
@@ -50,10 +50,9 @@ class PrinterService {
         'quantity': quantity,
         'printerIp': ip,
       });
-      return result ?? false;
+      return result ?? 'ERROR: No response from printer plugin';
     } on PlatformException catch (e) {
-      print('Print error: ${e.message}');
-      return false;
+      return 'ERROR: ${e.message}';
     }
   }
 
