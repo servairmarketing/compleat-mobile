@@ -25,24 +25,22 @@ class BrotherPrinterPlugin(
 ) : MethodChannel.MethodCallHandler {
 
     // QL-1110NWB with W62 (62mm) continuous roll:
-    // Printable width = 696 pixels at 300 dpi
-    // Bytes per raster line = ceil(696 / 8) = 87
+    // Printable width = 696 pixels at 300 dpi = 87 bytes per raster line
     private val PRINT_WIDTH_PX = 696
-    private val BYTES_PER_LINE = 87   // 696 / 8 = 87 exactly
+    private val BYTES_PER_LINE = 87  // 696 / 8 = 87 exactly
     private val PRINTER_PORT = 9100
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "printLabel" -> {
-                val productId    = call.argument<String>("productId")    ?: ""
-                val productName  = call.argument<String>("productName")  ?: ""
+                val productId     = call.argument<String>("productId")     ?: ""
+                val productName   = call.argument<String>("productName")   ?: ""
                 val parentRollId1 = call.argument<String>("parentRollId1") ?: ""
                 val parentRollId2 = call.argument<String>("parentRollId2") ?: ""
-                val quantity     = call.argument<Int>("quantity")        ?: 1
-                val printerIp    = call.argument<String>("printerIp")    ?: ""
+                val quantity      = call.argument<Int>("quantity")         ?: 1
+                val printerIp     = call.argument<String>("printerIp")     ?: ""
                 if (printerIp.isEmpty()) {
-                    result.error("NO_IP", "Printer IP not configured", null)
-                    return
+                    result.error("NO_IP", "Printer IP not configured", null); return
                 }
                 scope.launch {
                     try {
@@ -57,23 +55,20 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
-
             "getPrinterStatus" -> {
                 val printerIp = call.argument<String>("printerIp") ?: ""
                 if (printerIp.isEmpty()) { result.success("OFFLINE"); return }
                 scope.launch {
                     val statusStr = withContext(Dispatchers.IO) {
                         try {
-                            val socket = Socket()
-                            socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 2000)
-                            socket.close()
-                            "READY"
+                            val s = Socket()
+                            s.connect(InetSocketAddress(printerIp, PRINTER_PORT), 2000)
+                            s.close(); "READY"
                         } catch (e: Exception) { "OFFLINE" }
                     }
                     withContext(Dispatchers.Main) { result.success(statusStr) }
                 }
             }
-
             "testConnection" -> {
                 val printerIp = call.argument<String>("printerIp") ?: ""
                 if (printerIp.isEmpty()) { result.error("NO_IP", "No IP", null); return }
@@ -81,10 +76,9 @@ class BrotherPrinterPlugin(
                     try {
                         val reachable = withContext(Dispatchers.IO) {
                             try {
-                                val socket = Socket()
-                                socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 2000)
-                                socket.close()
-                                true
+                                val s = Socket()
+                                s.connect(InetSocketAddress(printerIp, PRINTER_PORT), 2000)
+                                s.close(); true
                             } catch (e: Exception) { false }
                         }
                         withContext(Dispatchers.Main) { result.success(reachable) }
@@ -93,18 +87,15 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
-
             "discoverPrinters" -> {
-                // SDK is only used here for discovery — not on the print path,
-                // so it cannot crash the app during normal use.
                 scope.launch {
                     try {
                         val printers = withContext(Dispatchers.IO) {
                             try {
                                 val channel = Channel.newWifiChannel("255.255.255.255")
-                                val generateResult = PrinterDriverGenerator.openChannel(channel)
-                                if (generateResult.error.code == OpenChannelError.ErrorCode.NoError) {
-                                    generateResult.driver.closeChannel()
+                                val r = PrinterDriverGenerator.openChannel(channel)
+                                if (r.error.code == OpenChannelError.ErrorCode.NoError) {
+                                    r.driver.closeChannel()
                                     listOf("192.168.2.181 (QL-1110NWB)")
                                 } else emptyList()
                             } catch (e: Exception) { emptyList<String>() }
@@ -115,26 +106,20 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
-
             else -> result.notImplemented()
         }
     }
 
     // -------------------------------------------------------------------------
-    // Raw TCP raster printing — no Brother SDK involvement whatsoever.
-    // Implements the QL-1100/1110NWB raster command protocol documented in:
-    // "Software Developer's Manual – Raster Command Reference QL-1100/1110NWB/1115NWB"
+    // Raw TCP raster printing — zero Brother SDK involvement on the print path.
+    // Protocol: Brother QL-1100/1110NWB/1115NWB Raster Command Reference v1.00
     // -------------------------------------------------------------------------
 
     private suspend fun printLabelRawTcp(
-        productId: String,
-        productName: String,
-        parentRollId1: String,
-        parentRollId2: String,
-        quantity: Int,
-        printerIp: String
+        productId: String, productName: String,
+        parentRollId1: String, parentRollId2: String,
+        quantity: Int, printerIp: String
     ): Boolean = withContext(Dispatchers.IO) {
-
         val bitmap = createLabelBitmap(productId, productName, parentRollId1, parentRollId2)
         val rasterJob = buildRasterJob(bitmap, quantity)
         bitmap.recycle()
@@ -146,7 +131,6 @@ class BrotherPrinterPlugin(
             val out: OutputStream = socket.getOutputStream()
             out.write(rasterJob)
             out.flush()
-            // Give the printer time to process before we close the connection
             Thread.sleep(500)
         } finally {
             socket.close()
@@ -155,156 +139,117 @@ class BrotherPrinterPlugin(
     }
 
     /**
-     * Builds the complete binary raster command sequence for the QL-1110NWB.
+     * Builds the complete binary raster job per the official QL-1100/1110NWB spec.
      *
-     * Sequence (per the official Brother raster spec for QL-1100/1110NWB):
-     *   1. Invalidate      — 200 × 0x00  (flush any junk in printer buffer)
-     *   2. Initialize      — ESC @       (1B 40)
-     *   3. Raster mode     — ESC i a 01  (1B 69 61 01)
-     *   4. Auto-status off — ESC i ! 00  (1B 69 21 00)
-     *   5. Print info      — ESC i z … (media type, width, page count)
-     *   6. Various mode    — ESC i M 40  (auto-cut on)
-     *   7. Cut each N      — ESC i A 01  (cut after every label)
-     *   8. Expanded mode   — ESC i K 08  (cut-at-end flag)
-     *   9. Margin amount   — ESC i d 00 00 (zero feed margin)
-     *  10. No compression  — M 00        (4D 00)
-     *  11. Raster lines    — 'g' 00 NN <87 bytes> per row, or 'Z' for blank row
-     *  12. Print + feed    — 0x1A
+     * FIXES applied vs previous version:
+     *  1. Invalidate = 350 null bytes (spec says 350, not 200)
+     *  2. ESC i z sends exactly 10 bytes of parameters (not 13)
+     *  3. No 'Z' zero-raster command — only valid in TIFF mode.
+     *     Every row is sent as a full 'g' raster line, even blank ones.
      *
-     * For multiple copies the control block + raster block is repeated,
-     * with the final copy using 0x1A (print+feed) and intermediate copies
-     * using 0x0C (FF — print without feeding).
+     * ESC i z parameter layout (10 bytes):
+     *   [0] flags     0x8E  — marks media type + width + length + quality valid
+     *   [1] media     0x0A  — continuous roll (not die-cut)
+     *   [2] width mm  62    — W62 label
+     *   [3] length mm 0     — 0 = continuous (no fixed length)
+     *   [4] raster lines low byte
+     *   [5] raster lines high byte
+     *   [6] page number (1-based)
+     *   [7] page count total
+     *   [8] color     0x00
+     *   [9] reserved  0x00
      */
     private fun buildRasterJob(bitmap: Bitmap, copies: Int): ByteArray {
-        val rasterRows = bitmapToRasterRows(bitmap)
-        val labelHeight = rasterRows.size   // number of dot rows
+        val rasterRows  = bitmapToRasterRows(bitmap)
+        val labelHeight = rasterRows.size
+        val heightLow   = (labelHeight and 0xFF).toByte()
+        val heightHigh  = ((labelHeight shr 8) and 0xFF).toByte()
 
         val job = mutableListOf<Byte>()
 
-        // ── 1. Invalidate (200 null bytes) ────────────────────────────────────
-        repeat(200) { job.add(0x00) }
+        // 1. Invalidate — 350 null bytes (spec explicitly says 350)
+        repeat(350) { job.add(0x00) }
 
-        // ── 2. Initialize ─────────────────────────────────────────────────────
-        job.addAll(listOf(0x1B, 0x40))
+        // 2. Initialize — ESC @
+        job.addAll(byteListOf(0x1B, 0x40))
 
-        // ── 3. Switch to raster mode ──────────────────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x61, 0x01))
+        // 3. Raster mode — ESC i a 01
+        job.addAll(byteListOf(0x1B, 0x69, 0x61, 0x01))
 
-        // ── 4. Disable auto status notification ───────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x21, 0x00))
+        // 4. Auto-status off — ESC i ! 00
+        job.addAll(byteListOf(0x1B, 0x69, 0x21, 0x00))
 
-        // ── 5. Print information command (ESC i z) ────────────────────────────
-        //   Byte layout (13 bytes total after ESC i z):
-        //     [0]  flags    : 0x8E  (valid bits: media type, width, length, quality)
-        //     [1]  media    : 0x0A  (continuous roll)
-        //     [2]  width    : 62    (mm)
-        //     [3]  length   : 0     (0 = continuous)
-        //     [4–5] raster lines low/high (label height in dots, little-endian)
-        //     [6–7] page number (0x00 0x00 = page 1)
-        //     [8–9] reserved  0x00 0x00
-        //     [10] color    : 0x00 (black only, no red)
-        //     [11] ink      : 0x00
-        //     [12] quality  : 0x00 (standard)
-        val heightLow  = (labelHeight and 0xFF).toByte()
-        val heightHigh = ((labelHeight shr 8) and 0xFF).toByte()
-        job.addAll(listOf(0x1B, 0x69, 0x7A))
-        job.addAll(listOf(
-            0x8E.toByte(), // flags
-            0x0A,          // media type: continuous roll
-            62,            // width mm
-            0x00,          // length mm (0 = continuous)
-            heightLow,
-            heightHigh,
-            0x00, 0x00,    // page number
-            0x00, 0x00,    // reserved
-            0x00,          // color
-            0x00,          // ink
-            0x00           // quality
+        // 5. Print information — ESC i z + 10 parameter bytes
+        job.addAll(byteListOf(0x1B, 0x69, 0x7A))
+        job.addAll(byteListOf(
+            0x8E,       // flags: media type, width, length, quality all valid
+            0x0A,       // media type: continuous roll
+            62,         // width: 62 mm
+            0x00,       // length: 0 = continuous
+            heightLow,  // raster line count LSB
+            heightHigh, // raster line count MSB
+            0x01,       // page number (1)
+            0x01,       // total pages (1)
+            0x00,       // color
+            0x00        // reserved
         ))
 
-        // ── 6. Various mode — enable auto-cut ─────────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x4D, 0x40))
+        // 6. Various mode — auto-cut on — ESC i M 40
+        job.addAll(byteListOf(0x1B, 0x69, 0x4D, 0x40))
 
-        // ── 7. Cut each label (every 1 label) ─────────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x41, 0x01))
+        // 7. Cut each 1 label — ESC i A 01
+        job.addAll(byteListOf(0x1B, 0x69, 0x41, 0x01))
 
-        // ── 8. Expanded mode — cut at end ─────────────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x4B, 0x08))
+        // 8. Expanded mode — cut at end — ESC i K 08
+        job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
 
-        // ── 9. Margin / feed amount — 0 dots ──────────────────────────────────
-        job.addAll(listOf(0x1B, 0x69, 0x64, 0x00, 0x00))
+        // 9. Margin = 0 — ESC i d 00 00
+        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x00, 0x00))
 
-        // ── 10. Compression mode — none ───────────────────────────────────────
-        job.addAll(listOf(0x4D, 0x00))
+        // 10. No compression — M 00
+        job.addAll(byteListOf(0x4D, 0x00))
 
-        // ── 11 + 12. Raster data + print command, repeated for each copy ──────
+        // 11 + 12. Raster lines + print command, once per copy
         for (copy in 1..copies) {
             for (row in rasterRows) {
-                val isBlank = row.all { it == 0.toByte() }
-                if (isBlank) {
-                    // 'Z' command — zero raster (blank line, 1 byte)
-                    job.add(0x5A)
-                } else {
-                    // 'g' command — raster graphics transfer
-                    //   0x67  0x00  <length byte>  <length bytes of data>
-                    job.add(0x67)
-                    job.add(0x00)
-                    job.add(BYTES_PER_LINE.toByte())
-                    row.forEach { job.add(it) }
-                }
+                // Always send full 'g' raster line — 'Z' is only valid in TIFF mode
+                job.add(0x67)                      // 'g' command
+                job.add(0x00)                      // fixed 0x00
+                job.add(BYTES_PER_LINE.toByte())   // data length = 87
+                row.forEach { job.add(it) }        // 87 bytes of pixel data
             }
-            // Print command: 0x1A = print + feed (last / only copy)
-            //                0x0C = FF print without extra feed (intermediate copies)
-            if (copy < copies) {
-                job.add(0x0C)  // FF — print, advance to next label, continue
-            } else {
-                job.add(0x1A)  // Control-Z — print + feed + cut final label
-            }
+            // 0x0C = FF print (intermediate copies), 0x1A = print+feed (last copy)
+            job.add(if (copy < copies) 0x0C else 0x1A)
         }
 
         return job.map { it.toByte() }.toByteArray()
     }
 
     /**
-     * Converts an Android [Bitmap] to a list of 1-bit packed raster rows.
-     *
-     * Rules:
-     *   - Bitmap is scaled to exactly [PRINT_WIDTH_PX] pixels wide if needed.
-     *   - Each row is [BYTES_PER_LINE] bytes (87 bytes for 696 px).
-     *   - A pixel is BLACK (1-bit = 1) when its luminance is < 128.
-     *   - Bit order: MSB first within each byte (leftmost pixel = bit 7 of byte 0).
+     * Converts Android Bitmap to 1-bit packed raster rows (MSB first, black=1).
+     * Scales to PRINT_WIDTH_PX wide if needed.
      */
     private fun bitmapToRasterRows(src: Bitmap): List<ByteArray> {
-        // Ensure exact print width
-        val bmp = if (src.width != PRINT_WIDTH_PX) {
-            val scaled = Bitmap.createScaledBitmap(src, PRINT_WIDTH_PX, src.height, true)
-            scaled
-        } else {
-            src
-        }
+        val bmp = if (src.width != PRINT_WIDTH_PX)
+            Bitmap.createScaledBitmap(src, PRINT_WIDTH_PX, src.height, true)
+        else src
 
-        val rows = mutableListOf<ByteArray>()
+        val rows   = mutableListOf<ByteArray>()
         val pixels = IntArray(PRINT_WIDTH_PX)
 
         for (y in 0 until bmp.height) {
             bmp.getPixels(pixels, 0, PRINT_WIDTH_PX, 0, y, PRINT_WIDTH_PX, 1)
-            val rowBytes = ByteArray(BYTES_PER_LINE) { 0x00 }
-
+            val rowBytes = ByteArray(BYTES_PER_LINE)
             for (x in 0 until PRINT_WIDTH_PX) {
                 val argb = pixels[x]
                 val r = (argb shr 16) and 0xFF
                 val g = (argb shr 8)  and 0xFF
                 val b = argb           and 0xFF
-                // Standard luminance formula
-                val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
-
-                if (luminance < 128) {
-                    // Dark pixel → print dot (bit = 1)
-                    val byteIndex = x / 8
-                    val bitIndex  = 7 - (x % 8)   // MSB first
-                    rowBytes[byteIndex] = (rowBytes[byteIndex].toInt() or (1 shl bitIndex)).toByte()
+                val lum = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+                if (lum < 128) {
+                    // Dark pixel → print dot (bit = 1, MSB first)
+                    rowBytes[x / 8] = (rowBytes[x / 8].toInt() or (1 shl (7 - x % 8))).toByte()
                 }
-                // Light pixel → leave as 0 (no dot)
             }
             rows.add(rowBytes)
         }
@@ -313,15 +258,16 @@ class BrotherPrinterPlugin(
         return rows
     }
 
+    /** Helper to create a List<Byte> from Int varargs (avoids toByte() noise inline) */
+    private fun byteListOf(vararg ints: Int): List<Byte> = ints.map { it.toByte() }
+
     // -------------------------------------------------------------------------
-    // Label bitmap — unchanged from original
+    // Label bitmap — unchanged
     // -------------------------------------------------------------------------
 
     private fun createLabelBitmap(
-        productId: String,
-        productName: String,
-        parentRollId1: String,
-        parentRollId2: String
+        productId: String, productName: String,
+        parentRollId1: String, parentRollId2: String
     ): Bitmap {
         val width = 696; val height = 270
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
