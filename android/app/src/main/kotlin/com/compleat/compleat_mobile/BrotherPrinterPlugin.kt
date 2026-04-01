@@ -160,58 +160,6 @@ class BrotherPrinterPlugin(
             socket.soTimeout = 15000
             try {
                 val out: OutputStream = socket.getOutputStream()
-                val inp = socket.getInputStream()
-
-                // --- Status request handshake (ESC i S) ---
-                out.write(byteArrayOf(0x1B, 0x69.toByte(), 0x53))
-                out.flush()
-                Log.d("BrotherPrint", "Status request sent (ESC i S)")
-                log.appendLine("statusRequestSent=true")
-
-                socket.soTimeout = 3000
-                val statusBytes = ByteArray(32)
-                val statusDetail: String = try {
-                    var totalRead = 0
-                    while (totalRead < 32) {
-                        val n = inp.read(statusBytes, totalRead, 32 - totalRead)
-                        if (n == -1) break
-                        totalRead += n
-                    }
-                    if (totalRead == 0) {
-                        Log.w("BrotherPrint", "No status response")
-                        log.appendLine("statusResponse=none")
-                        "statusResponse=none"
-                    } else {
-                        val hex = statusBytes.take(totalRead).joinToString(" ") { "%02X".format(it) }
-                        Log.d("BrotherPrint", "Status response ($totalRead bytes): $hex")
-                        log.appendLine("statusRawHex=$hex")
-                        if (totalRead >= 32 && statusBytes[0] == 0x80.toByte()) {
-                            val ei1    = statusBytes[4].toInt()  and 0xFF
-                            val ei2    = statusBytes[5].toInt()  and 0xFF
-                            val width  = statusBytes[6].toInt()  and 0xFF
-                            val mtype  = statusBytes[7].toInt()  and 0xFF
-                            val stype  = statusBytes[11].toInt() and 0xFF
-                            val phase  = statusBytes[12].toInt() and 0xFF
-                            val parsed = "byte[0]=0x80(valid) ei1=0x%02X ei2=0x%02X width=%dmm mediaType=0x%02X statusType=0x%02X phase=0x%02X"
-                                .format(ei1, ei2, width, mtype, stype, phase)
-                            Log.d("BrotherPrint", "Status parsed: $parsed")
-                            log.appendLine("statusParsed=$parsed")
-                            parsed
-                        } else if (totalRead > 0 && statusBytes[0] != 0x80.toByte()) {
-                            Log.w("BrotherPrint", "Invalid status response: byte[0]=0x%02X".format(statusBytes[0]))
-                            log.appendLine("statusResponse=invalid byte[0]=0x%02X".format(statusBytes[0]))
-                            "statusResponse=invalid byte[0]=0x%02X".format(statusBytes[0])
-                        } else {
-                            "statusResponse=partial($totalRead bytes) hex=$hex"
-                        }
-                    }
-                } catch (e: java.net.SocketTimeoutException) {
-                    Log.w("BrotherPrint", "No status response (timeout)")
-                    log.appendLine("statusResponse=timeout")
-                    "statusResponse=timeout"
-                }
-                socket.soTimeout = 15000
-                // --- End status handshake ---
 
                 Log.d("BrotherPrint", "Writing job: ${rasterJob.size} bytes total")
                 out.write(rasterJob)
@@ -234,9 +182,9 @@ class BrotherPrinterPlugin(
         }
 
         val detail = if (errorMsg == null) {
-            "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent\n${log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")}"
+            "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
         } else {
-            "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent\n${log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")}"
+            "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
         }
         log.appendLine("result=$detail")
 
@@ -255,19 +203,20 @@ class BrotherPrinterPlugin(
      *
      * ESC i z parameter layout (10 bytes):
      *   [0] flags     0x8E  — marks media type + width + length + quality valid
-     *   [1] media     0x0A  — continuous roll (not die-cut)
-     *   [2] width mm  62    — W62 label
-     *   [3] length mm 0     — 0 = continuous (no fixed length)
+     *   [1] media     0x0B  — die-cut label
+     *   [2] width mm  62    — DK-1202 label width
+     *   [3] length mm 0x64  — 100mm (DK-1202 die-cut length)
      *   [4-7] raster line count as 4-byte little-endian uint32
-     *         e.g. 270 lines → n5=0x0E, n6=0x01, n7=0x00, n8=0x00
      *   [8] color     0x00
      *   [9] reserved  0x00
      */
     private fun buildRasterJob(bitmap: Bitmap, copies: Int): ByteArray {
         val rasterRows  = bitmapToRasterRows(bitmap)
         val labelHeight = rasterRows.size
-        val heightLow   = labelHeight and 0xFF
-        val heightHigh  = (labelHeight shr 8) and 0xFF
+        val h0 = labelHeight          and 0xFF
+        val h1 = (labelHeight shr  8) and 0xFF
+        val h2 = (labelHeight shr 16) and 0xFF
+        val h3 = (labelHeight shr 24) and 0xFF
 
         val job = mutableListOf<Byte>()
 
@@ -286,16 +235,16 @@ class BrotherPrinterPlugin(
         // 5. Print information — ESC i z + 10 parameter bytes
         job.addAll(byteListOf(0x1B, 0x69, 0x7A))
         job.addAll(byteListOf(
-            0x8E,       // flags: media type, width, length, quality all valid
-            0x0A,       // media type: continuous roll
-            62,         // width: 62 mm
-            0x00,       // length: 0 = continuous
-            heightLow,  // n5: raster line count byte 0 (LSB)
-            heightHigh, // n6: raster line count byte 1
-            0x00,       // n7: raster line count byte 2
-            0x00,       // n8: raster line count byte 3 (MSB)
-            0x00,       // color
-            0x00        // reserved
+            0x8E,  // flags: media type, width, length, quality all valid
+            0x0B,  // media type: die-cut label (DK-1202)
+            62,    // width: 62 mm
+            0x64,  // length: 100 mm (DK-1202)
+            h0,    // n5: raster line count byte 0 (LSB)
+            h1,    // n6: raster line count byte 1
+            h2,    // n7: raster line count byte 2
+            h3,    // n8: raster line count byte 3 (MSB)
+            0x00,  // color
+            0x00   // reserved
         ))
 
         // 6. Various mode — auto-cut on — ESC i M 40
@@ -307,9 +256,8 @@ class BrotherPrinterPlugin(
         // 8. Expanded mode — cut at end — ESC i K 08
         job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
 
-        // 9. Margin = 35 dots (0x23) — ESC i d 23 00
-        //    Spec minimum for continuous roll is 35 dots (≈3 mm)
-        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x23, 0x00))
+        // 9. Margin = 0 dots — ESC i d 00 00 (die-cut label, no feed margin needed)
+        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x00, 0x00))
 
         // 10. No compression — M 00
         job.addAll(byteListOf(0x4D, 0x00))
@@ -385,7 +333,7 @@ class BrotherPrinterPlugin(
             .format(java.util.Date())
         log.appendLine("=== BlankTest debug $ts ===")
 
-        val rasterCount = 100
+        val rasterCount = 1109  // DK-1202: 62x100mm @ 300dpi ≈ 1109 lines
 
         val job = mutableListOf<Byte>()
 
@@ -402,16 +350,16 @@ class BrotherPrinterPlugin(
         job.addAll(byteListOf(0x1B, 0x69, 0x21, 0x00))
 
         // 5. Print information — ESC i z + 10 parameter bytes
-        //    flags=0x8E, media=0x0A(continuous), width=62mm, length=0(continuous),
-        //    raster_count=100 (little-endian 4 bytes)
+        //    flags=0x8E, media=0x0B(die-cut), width=62mm, length=100mm(0x64),
+        //    raster_count=1109 = 0x00000455 → 0x55 0x04 0x00 0x00 (little-endian)
         job.addAll(byteListOf(0x1B, 0x69, 0x7A))
         job.addAll(byteListOf(
             0x8E,                          // flags
-            0x0A,                          // media type: continuous roll
+            0x0B,                          // media type: die-cut label (DK-1202)
             62,                            // width mm
-            0x00,                          // length mm: 0 = continuous
-            rasterCount and 0xFF,          // n5: count LSB
-            (rasterCount shr 8) and 0xFF,  // n6
+            0x64,                          // length mm: 100mm
+            rasterCount and 0xFF,          // n5: count LSB  (0x55)
+            (rasterCount shr 8) and 0xFF,  // n6             (0x04)
             0x00,                          // n7
             0x00,                          // n8: count MSB
             0x00,                          // color
@@ -427,13 +375,13 @@ class BrotherPrinterPlugin(
         // 8. Cut at end — ESC i K 08
         job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
 
-        // 9. Margin = 35 dots — ESC i d 23 00
-        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x23, 0x00))
+        // 9. Margin = 0 dots — ESC i d 00 00 (die-cut, no feed margin)
+        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x00, 0x00))
 
         // 10. No compression — M 00
         job.addAll(byteListOf(0x4D, 0x00))
 
-        // 11. 100 raster lines of pure zeros: g 00 A2 + 162 zero bytes
+        // 11. 1109 raster lines of pure zeros: g 00 A2 + 162 zero bytes
         repeat(rasterCount) {
             job.add(0x67)                       // 'g' raster command
             job.add(0x00)                       // fixed 0x00
@@ -460,48 +408,6 @@ class BrotherPrinterPlugin(
             socket.soTimeout = 15000
             try {
                 val out: OutputStream = socket.getOutputStream()
-                val inp = socket.getInputStream()
-
-                // Status request handshake
-                out.write(byteArrayOf(0x1B, 0x69.toByte(), 0x53))
-                out.flush()
-                log.appendLine("statusRequestSent=true")
-
-                socket.soTimeout = 3000
-                val statusBytes = ByteArray(32)
-                val statusDetail: String = try {
-                    var totalRead = 0
-                    while (totalRead < 32) {
-                        val n = inp.read(statusBytes, totalRead, 32 - totalRead)
-                        if (n == -1) break
-                        totalRead += n
-                    }
-                    if (totalRead == 0) {
-                        log.appendLine("statusResponse=none")
-                        "statusResponse=none"
-                    } else {
-                        val hex = statusBytes.take(totalRead).joinToString(" ") { "%02X".format(it) }
-                        log.appendLine("statusRawHex=$hex")
-                        if (totalRead >= 32 && statusBytes[0] == 0x80.toByte()) {
-                            val ei1   = statusBytes[4].toInt()  and 0xFF
-                            val ei2   = statusBytes[5].toInt()  and 0xFF
-                            val width = statusBytes[6].toInt()  and 0xFF
-                            val mtype = statusBytes[7].toInt()  and 0xFF
-                            val stype = statusBytes[11].toInt() and 0xFF
-                            val phase = statusBytes[12].toInt() and 0xFF
-                            val parsed = "byte[0]=0x80 ei1=0x%02X ei2=0x%02X width=%dmm mediaType=0x%02X statusType=0x%02X phase=0x%02X"
-                                .format(ei1, ei2, width, mtype, stype, phase)
-                            log.appendLine("statusParsed=$parsed")
-                            parsed
-                        } else {
-                            "statusResponse=partial($totalRead bytes) hex=$hex"
-                        }
-                    }
-                } catch (e: java.net.SocketTimeoutException) {
-                    log.appendLine("statusResponse=timeout")
-                    "statusResponse=timeout"
-                }
-                socket.soTimeout = 15000
 
                 Log.d("BrotherPrint", "Writing blank job: ${jobBytes.size} bytes")
                 out.write(jobBytes)
@@ -520,11 +426,9 @@ class BrotherPrinterPlugin(
         }
 
         val detail = if (errorMsg == null) {
-            "BLANK OK: jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent\n" +
-            log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")
+            "BLANK OK: jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent"
         } else {
-            "BLANK ERROR: $errorMsg | jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent\n" +
-            log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")
+            "BLANK ERROR: $errorMsg | jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent"
         }
         log.appendLine("result=$detail")
 
@@ -548,30 +452,55 @@ class BrotherPrinterPlugin(
         productId: String, productName: String,
         parentRollId1: String, parentRollId2: String
     ): Bitmap {
-        val width = 696; val height = 270
+        val width = 696; val height = 1109  // DK-1202: 62x100mm @ 300dpi
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.BLACK
-        paint.textSize = 48f
+
+        // Product ID — large bold at top
+        paint.textSize = 90f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText(productId, 20f, 60f, paint)
-        paint.textSize = 32f
+        canvas.drawText(productId, 30f, 160f, paint)
+
+        // Product name
+        paint.textSize = 54f
         paint.typeface = Typeface.DEFAULT
-        canvas.drawText(productName, 20f, 110f, paint)
-        paint.strokeWidth = 2f
-        canvas.drawLine(20f, 125f, (width - 20).toFloat(), 125f, paint)
-        paint.textSize = 26f
+        canvas.drawText(productName, 30f, 270f, paint)
+
+        // Divider
+        paint.strokeWidth = 3f
+        canvas.drawLine(30f, 310f, (width - 30).toFloat(), 310f, paint)
+
+        // Parent roll label
+        paint.textSize = 44f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("Parent Roll:", 20f, 160f, paint)
+        canvas.drawText("Parent Roll:", 30f, 420f, paint)
+
+        // Parent roll value
+        paint.textSize = 56f
         paint.typeface = Typeface.DEFAULT
-        paint.textSize = 28f
         val parentText = if (parentRollId2.isNotEmpty()) "$parentRollId1 / $parentRollId2" else parentRollId1
-        canvas.drawText(parentText, 20f, 200f, paint)
-        paint.textSize = 22f
+        canvas.drawText(parentText, 30f, 520f, paint)
+
+        // Divider
+        canvas.drawLine(30f, 570f, (width - 30).toFloat(), 570f, paint)
+
+        // Date label
+        paint.textSize = 42f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Date:", 30f, 670f, paint)
+
+        // Date value
+        paint.textSize = 50f
+        paint.typeface = Typeface.DEFAULT
         val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        canvas.drawText(date, 20f, 240f, paint)
+        canvas.drawText(date, 30f, 760f, paint)
+
+        // Bottom divider
+        canvas.drawLine(30f, 1050f, (width - 30).toFloat(), 1050f, paint)
+
         return bitmap
     }
 }
