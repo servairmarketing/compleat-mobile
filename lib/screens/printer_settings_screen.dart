@@ -15,7 +15,6 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   final _ipController = TextEditingController();
   PrinterStatus _status = PrinterStatus.checking;
   bool _printing = false;
-  bool _sendingBlankTest = false;
   Timer? _pollTimer;
 
   @override
@@ -76,28 +75,6 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
         context: context,
         builder: (_) => AlertDialog(
           title: Text(detail.startsWith('OK:') ? 'Print Sent' : 'Print Result'),
-          content: SelectableText(detail),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
-
-  Future<void> _sendBlankTest() async {
-    setState(() => _sendingBlankTest = true);
-    final ip = _ipController.text.trim();
-    final detail = await PrinterService.sendBlankTest(printerIp: ip);
-    setState(() => _sendingBlankTest = false);
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text(detail.startsWith('BLANK OK:') ? 'Blank Test Sent' : 'Blank Test Result'),
           content: SelectableText(detail),
           actions: [
             TextButton(
@@ -241,21 +218,6 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: OutlinedButton.icon(
-                onPressed: (_sendingBlankTest || _ipController.text.trim().isEmpty) ? null : _sendBlankTest,
-                icon: _sendingBlankTest
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.science, size: 24),
-                label: Text(
-                  _sendingBlankTest ? 'Sending...' : 'Send Blank Test',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
             ),
             const SizedBox(height: 32),
             const Card(

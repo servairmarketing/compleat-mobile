@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.Log
@@ -108,18 +109,6 @@ class BrotherPrinterPlugin(
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) { result.success(emptyList<String>()) }
                     }
-                }
-            }
-            "sendBlankTest" -> {
-                val printerIp = call.argument<String>("printerIp") ?: ""
-                if (printerIp.isEmpty()) { result.error("NO_IP", "Printer IP not configured", null); return }
-                scope.launch {
-                    val detail = try {
-                        sendMinimalBlankJob(printerIp)
-                    } catch (e: Exception) {
-                        "ERROR: ${e.message ?: "Unknown error"}"
-                    }
-                    withContext(Dispatchers.Main) { result.success(detail) }
                 }
             }
             else -> result.notImplemented()
@@ -320,187 +309,87 @@ class BrotherPrinterPlugin(
         return rows
     }
 
-    // -------------------------------------------------------------------------
-    // Blank label test — sends a minimal valid job with no image content.
-    // Purpose: if this prints a blank label, the protocol framing is correct
-    // and any "transferred data error" is caused by the image data, not the
-    // command sequence.  If this also goes red, the problem is in the commands.
-    // -------------------------------------------------------------------------
-
-    private suspend fun sendMinimalBlankJob(printerIp: String): String = withContext(Dispatchers.IO) {
-        val log = StringBuilder()
-        val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-            .format(java.util.Date())
-        log.appendLine("=== BlankTest debug $ts ===")
-
-        val rasterCount = 1109  // DK-1202: 62x100mm @ 300dpi ≈ 1109 lines
-
-        val job = mutableListOf<Byte>()
-
-        // 1. Invalidate — 200 null bytes
-        repeat(200) { job.add(0x00) }
-
-        // 2. Initialize — ESC @
-        job.addAll(byteListOf(0x1B, 0x40))
-
-        // 3. Raster mode — ESC i a 01
-        job.addAll(byteListOf(0x1B, 0x69, 0x61, 0x01))
-
-        // 4. Auto-status off — ESC i ! 00
-        job.addAll(byteListOf(0x1B, 0x69, 0x21, 0x00))
-
-        // 5. Print information — ESC i z + 10 parameter bytes
-        //    flags=0x8E, media=0x0B(die-cut), width=62mm, length=100mm(0x64),
-        //    raster_count=1109 = 0x00000455 → 0x55 0x04 0x00 0x00 (little-endian)
-        job.addAll(byteListOf(0x1B, 0x69, 0x7A))
-        job.addAll(byteListOf(
-            0x8E,                          // flags
-            0x0B,                          // media type: die-cut label (DK-1202)
-            62,                            // width mm
-            0x64,                          // length mm: 100mm
-            rasterCount and 0xFF,          // n5: count LSB  (0x55)
-            (rasterCount shr 8) and 0xFF,  // n6             (0x04)
-            0x00,                          // n7
-            0x00,                          // n8: count MSB
-            0x00,                          // color
-            0x00                           // reserved
-        ))
-
-        // 6. Auto-cut on — ESC i M 40
-        job.addAll(byteListOf(0x1B, 0x69, 0x4D, 0x40))
-
-        // 7. Cut each 1 label — ESC i A 01
-        job.addAll(byteListOf(0x1B, 0x69, 0x41, 0x01))
-
-        // 8. Cut at end — ESC i K 08
-        job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
-
-        // 9. Margin = 0 dots — ESC i d 00 00 (die-cut, no feed margin)
-        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x00, 0x00))
-
-        // 10. No compression — M 00
-        job.addAll(byteListOf(0x4D, 0x00))
-
-        // 11. 1109 raster lines of pure zeros: g 00 A2 + 162 zero bytes
-        repeat(rasterCount) {
-            job.add(0x67)                       // 'g' raster command
-            job.add(0x00)                       // fixed 0x00
-            job.add(BYTES_PER_LINE.toByte())    // 0xA2 = 162
-            repeat(BYTES_PER_LINE) { job.add(0x00) }
-        }
-
-        // 12. Print + feed
-        job.add(0x1A)
-
-        val jobBytes = job.map { it.toByte() }.toByteArray()
-        log.appendLine("blankJobBytes=${jobBytes.size}")
-        Log.d("BrotherPrint", "Blank job built: ${jobBytes.size} bytes")
-
-        var socketConnected = false
-        var dataSent = false
-        var errorMsg: String? = null
-
-        try {
-            val socket = Socket()
-            socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
-            socketConnected = true
-            log.appendLine("socketConnected=true  ip=$printerIp:$PRINTER_PORT")
-            socket.soTimeout = 15000
-            try {
-                val out: OutputStream = socket.getOutputStream()
-
-                Log.d("BrotherPrint", "Writing blank job: ${jobBytes.size} bytes")
-                out.write(jobBytes)
-                out.flush()
-                dataSent = true
-                log.appendLine("dataSent=true")
-                Thread.sleep(2000)
-                log.appendLine("drainSleepDone=true")
-            } finally {
-                socket.close()
-                log.appendLine("socketClosed=true")
-            }
-        } catch (e: Exception) {
-            errorMsg = e.message ?: "Unknown error"
-            log.appendLine("error=$errorMsg")
-        }
-
-        val detail = if (errorMsg == null) {
-            "BLANK OK: jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent"
-        } else {
-            "BLANK ERROR: $errorMsg | jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent"
-        }
-        log.appendLine("result=$detail")
-
-        try {
-            java.io.File("/sdcard/brother_blank_test_debug.txt").writeText(log.toString())
-        } catch (e: Exception) {
-            Log.w("BrotherPrint", "Could not write blank test debug file: ${e.message}")
-        }
-
-        detail
-    }
-
     /** Helper to create a List<Byte> from Int varargs (avoids toByte() noise inline) */
     private fun byteListOf(vararg ints: Int): List<Byte> = ints.map { it.toByte() }
 
     // -------------------------------------------------------------------------
-    // Label bitmap — unchanged
+    // Label bitmap — landscape barcode layout
     // -------------------------------------------------------------------------
 
     private fun createLabelBitmap(
-        productId: String, productName: String,
-        parentRollId1: String, parentRollId2: String
+        productId: String,
+        productName: String,
+        parentRollId1: String,
+        parentRollId2: String
     ): Bitmap {
-        val width = 696; val height = 1109  // DK-1202: 62x100mm @ 300dpi
+        // Landscape: 1296px wide × 600px tall (fits W62 at 300dpi landscape)
+        // The printer prints this landscape — no rotation needed in software
+        val width = 1296
+        val height = 600
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
+
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.BLACK
 
-        // Product ID — large bold at top
-        paint.textSize = 90f
+        // ── RIGHT SECTION: Product ID text (large bold) ──
+        paint.textSize = 120f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText(productId, 30f, 160f, paint)
+        val pidX = 1050f
+        val pidY = 400f
+        // Rotate canvas to draw text vertically (reading bottom-to-top)
+        canvas.save()
+        canvas.rotate(-90f, pidX, pidY)
+        canvas.drawText(productId, pidX - 200f, pidY + 40f, paint)
+        canvas.restore()
 
-        // Product name
-        paint.textSize = 54f
-        paint.typeface = Typeface.DEFAULT
-        canvas.drawText(productName, 30f, 270f, paint)
+        // ── CENTER SECTION: Barcode of productId (rotated 90° to run vertically) ──
+        val barcodeBitmap = generateBarcode(productId, 600, 400)
+        if (barcodeBitmap != null) {
+            val rotMatrix = Matrix()
+            rotMatrix.postRotate(90f)
+            val rotatedBarcode = Bitmap.createBitmap(
+                barcodeBitmap, 0, 0, barcodeBitmap.width, barcodeBitmap.height, rotMatrix, true
+            )
+            barcodeBitmap.recycle()
+            val barcodeX = (width / 2 - rotatedBarcode.width / 2).toFloat()
+            val barcodeY = (height / 2 - rotatedBarcode.height / 2).toFloat()
+            canvas.drawBitmap(rotatedBarcode, barcodeX, barcodeY, null)
+            rotatedBarcode.recycle()
+        }
 
-        // Divider
-        paint.strokeWidth = 3f
-        canvas.drawLine(30f, 310f, (width - 30).toFloat(), 310f, paint)
-
-        // Parent roll label
-        paint.textSize = 44f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("Parent Roll:", 30f, 420f, paint)
-
-        // Parent roll value
-        paint.textSize = 56f
-        paint.typeface = Typeface.DEFAULT
+        // ── LEFT SECTION: Parent Roll ID ──
+        paint.textSize = 80f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         val parentText = if (parentRollId2.isNotEmpty()) "$parentRollId1 / $parentRollId2" else parentRollId1
-        canvas.drawText(parentText, 30f, 520f, paint)
-
-        // Divider
-        canvas.drawLine(30f, 570f, (width - 30).toFloat(), 570f, paint)
-
-        // Date label
-        paint.textSize = 42f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("Date:", 30f, 670f, paint)
-
-        // Date value
-        paint.textSize = 50f
-        paint.typeface = Typeface.DEFAULT
-        val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        canvas.drawText(date, 30f, 760f, paint)
-
-        // Bottom divider
-        canvas.drawLine(30f, 1050f, (width - 30).toFloat(), 1050f, paint)
+        val parentX = 150f
+        val parentY = 400f
+        canvas.save()
+        canvas.rotate(-90f, parentX, parentY)
+        canvas.drawText(parentText, parentX - 150f, parentY + 30f, paint)
+        canvas.restore()
 
         return bitmap
+    }
+
+    private fun generateBarcode(data: String, targetWidth: Int, targetHeight: Int): Bitmap? {
+        return try {
+            val writer = com.google.zxing.MultiFormatWriter()
+            val matrix = writer.encode(data, com.google.zxing.BarcodeFormat.CODE_128, targetWidth, targetHeight)
+            val barcodeWidth = matrix.width
+            val barcodeHeight = matrix.height
+            val pixels = IntArray(barcodeWidth * barcodeHeight)
+            for (y in 0 until barcodeHeight) {
+                for (x in 0 until barcodeWidth) {
+                    pixels[y * barcodeWidth + x] = if (matrix[x, y]) Color.BLACK else Color.WHITE
+                }
+            }
+            val bmp = Bitmap.createBitmap(barcodeWidth, barcodeHeight, Bitmap.Config.ARGB_8888)
+            bmp.setPixels(pixels, 0, barcodeWidth, 0, 0, barcodeWidth, barcodeHeight)
+            bmp
+        } catch (e: Exception) {
+            null
+        }
     }
 }
