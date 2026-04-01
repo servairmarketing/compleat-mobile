@@ -56,6 +56,17 @@ class PrinterService {
     }
   }
 
+  static Future<String> sendBlankTest({required String printerIp}) async {
+    try {
+      final result = await _channel.invokeMethod<String>('sendBlankTest', {
+        'printerIp': printerIp,
+      });
+      return result ?? 'ERROR: No response from printer plugin';
+    } on PlatformException catch (e) {
+      return 'ERROR: ${e.message}';
+    }
+  }
+
   static Future<List<String>> discoverPrinters() async {
     try {
       final result = await _channel.invokeListMethod<String>('discoverPrinters');

@@ -110,6 +110,18 @@ class BrotherPrinterPlugin(
                     }
                 }
             }
+            "sendBlankTest" -> {
+                val printerIp = call.argument<String>("printerIp") ?: ""
+                if (printerIp.isEmpty()) { result.error("NO_IP", "Printer IP not configured", null); return }
+                scope.launch {
+                    val detail = try {
+                        sendMinimalBlankJob(printerIp)
+                    } catch (e: Exception) {
+                        "ERROR: ${e.message ?: "Unknown error"}"
+                    }
+                    withContext(Dispatchers.Main) { result.success(detail) }
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -358,6 +370,171 @@ class BrotherPrinterPlugin(
 
         if (bmp !== src) bmp.recycle()
         return rows
+    }
+
+    // -------------------------------------------------------------------------
+    // Blank label test — sends a minimal valid job with no image content.
+    // Purpose: if this prints a blank label, the protocol framing is correct
+    // and any "transferred data error" is caused by the image data, not the
+    // command sequence.  If this also goes red, the problem is in the commands.
+    // -------------------------------------------------------------------------
+
+    private suspend fun sendMinimalBlankJob(printerIp: String): String = withContext(Dispatchers.IO) {
+        val log = StringBuilder()
+        val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        log.appendLine("=== BlankTest debug $ts ===")
+
+        val rasterCount = 100
+
+        val job = mutableListOf<Byte>()
+
+        // 1. Invalidate — 200 null bytes
+        repeat(200) { job.add(0x00) }
+
+        // 2. Initialize — ESC @
+        job.addAll(byteListOf(0x1B, 0x40))
+
+        // 3. Raster mode — ESC i a 01
+        job.addAll(byteListOf(0x1B, 0x69, 0x61, 0x01))
+
+        // 4. Auto-status off — ESC i ! 00
+        job.addAll(byteListOf(0x1B, 0x69, 0x21, 0x00))
+
+        // 5. Print information — ESC i z + 10 parameter bytes
+        //    flags=0x8E, media=0x0A(continuous), width=62mm, length=0(continuous),
+        //    raster_count=100 (little-endian 4 bytes)
+        job.addAll(byteListOf(0x1B, 0x69, 0x7A))
+        job.addAll(byteListOf(
+            0x8E,                          // flags
+            0x0A,                          // media type: continuous roll
+            62,                            // width mm
+            0x00,                          // length mm: 0 = continuous
+            rasterCount and 0xFF,          // n5: count LSB
+            (rasterCount shr 8) and 0xFF,  // n6
+            0x00,                          // n7
+            0x00,                          // n8: count MSB
+            0x00,                          // color
+            0x00                           // reserved
+        ))
+
+        // 6. Auto-cut on — ESC i M 40
+        job.addAll(byteListOf(0x1B, 0x69, 0x4D, 0x40))
+
+        // 7. Cut each 1 label — ESC i A 01
+        job.addAll(byteListOf(0x1B, 0x69, 0x41, 0x01))
+
+        // 8. Cut at end — ESC i K 08
+        job.addAll(byteListOf(0x1B, 0x69, 0x4B, 0x08))
+
+        // 9. Margin = 35 dots — ESC i d 23 00
+        job.addAll(byteListOf(0x1B, 0x69, 0x64, 0x23, 0x00))
+
+        // 10. No compression — M 00
+        job.addAll(byteListOf(0x4D, 0x00))
+
+        // 11. 100 raster lines of pure zeros: g 00 A2 + 162 zero bytes
+        repeat(rasterCount) {
+            job.add(0x67)                       // 'g' raster command
+            job.add(0x00)                       // fixed 0x00
+            job.add(BYTES_PER_LINE.toByte())    // 0xA2 = 162
+            repeat(BYTES_PER_LINE) { job.add(0x00) }
+        }
+
+        // 12. Print + feed
+        job.add(0x1A)
+
+        val jobBytes = job.map { it.toByte() }.toByteArray()
+        log.appendLine("blankJobBytes=${jobBytes.size}")
+        Log.d("BrotherPrint", "Blank job built: ${jobBytes.size} bytes")
+
+        var socketConnected = false
+        var dataSent = false
+        var errorMsg: String? = null
+
+        try {
+            val socket = Socket()
+            socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
+            socketConnected = true
+            log.appendLine("socketConnected=true  ip=$printerIp:$PRINTER_PORT")
+            socket.soTimeout = 15000
+            try {
+                val out: OutputStream = socket.getOutputStream()
+                val inp = socket.getInputStream()
+
+                // Status request handshake
+                out.write(byteArrayOf(0x1B, 0x69.toByte(), 0x53))
+                out.flush()
+                log.appendLine("statusRequestSent=true")
+
+                socket.soTimeout = 3000
+                val statusBytes = ByteArray(32)
+                val statusDetail: String = try {
+                    var totalRead = 0
+                    while (totalRead < 32) {
+                        val n = inp.read(statusBytes, totalRead, 32 - totalRead)
+                        if (n == -1) break
+                        totalRead += n
+                    }
+                    if (totalRead == 0) {
+                        log.appendLine("statusResponse=none")
+                        "statusResponse=none"
+                    } else {
+                        val hex = statusBytes.take(totalRead).joinToString(" ") { "%02X".format(it) }
+                        log.appendLine("statusRawHex=$hex")
+                        if (totalRead >= 32 && statusBytes[0] == 0x80.toByte()) {
+                            val ei1   = statusBytes[4].toInt()  and 0xFF
+                            val ei2   = statusBytes[5].toInt()  and 0xFF
+                            val width = statusBytes[6].toInt()  and 0xFF
+                            val mtype = statusBytes[7].toInt()  and 0xFF
+                            val stype = statusBytes[11].toInt() and 0xFF
+                            val phase = statusBytes[12].toInt() and 0xFF
+                            val parsed = "byte[0]=0x80 ei1=0x%02X ei2=0x%02X width=%dmm mediaType=0x%02X statusType=0x%02X phase=0x%02X"
+                                .format(ei1, ei2, width, mtype, stype, phase)
+                            log.appendLine("statusParsed=$parsed")
+                            parsed
+                        } else {
+                            "statusResponse=partial($totalRead bytes) hex=$hex"
+                        }
+                    }
+                } catch (e: java.net.SocketTimeoutException) {
+                    log.appendLine("statusResponse=timeout")
+                    "statusResponse=timeout"
+                }
+                socket.soTimeout = 15000
+
+                Log.d("BrotherPrint", "Writing blank job: ${jobBytes.size} bytes")
+                out.write(jobBytes)
+                out.flush()
+                dataSent = true
+                log.appendLine("dataSent=true")
+                Thread.sleep(2000)
+                log.appendLine("drainSleepDone=true")
+            } finally {
+                socket.close()
+                log.appendLine("socketClosed=true")
+            }
+        } catch (e: Exception) {
+            errorMsg = e.message ?: "Unknown error"
+            log.appendLine("error=$errorMsg")
+        }
+
+        val detail = if (errorMsg == null) {
+            "BLANK OK: jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent\n" +
+            log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")
+        } else {
+            "BLANK ERROR: $errorMsg | jobBytes=${jobBytes.size}, socketConnected=$socketConnected, dataSent=$dataSent\n" +
+            log.lines().filter { it.startsWith("statusParsed=") || it.startsWith("statusResponse=") }.joinToString("\n")
+        }
+        log.appendLine("result=$detail")
+
+        try {
+            java.io.File("/sdcard/brother_blank_test_debug.txt").writeText(log.toString())
+        } catch (e: Exception) {
+            Log.w("BrotherPrint", "Could not write blank test debug file: ${e.message}")
+        }
+
+        detail
     }
 
     /** Helper to create a List<Byte> from Int varargs (avoids toByte() noise inline) */
