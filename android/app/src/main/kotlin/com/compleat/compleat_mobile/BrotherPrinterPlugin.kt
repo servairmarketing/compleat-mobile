@@ -354,7 +354,9 @@ class BrotherPrinterPlugin(
         val productBounds = android.graphics.Rect()
         paint.getTextBounds(productId, 0, productId.length, productBounds)
         val productY = yProduct + (zoneProductH / 2f) + (productBounds.height() / 2f)
-        canvas.drawText(productId, margin.toFloat(), productY, paint)
+        val productTextWidth = paint.measureText(productId)
+        val productX = (width - productTextWidth) / 2f
+        canvas.drawText(productId, productX, productY, paint)
 
         // ── ZONE 2: Barcode (productId encoded) ──
         val barcodeMargin = 8
@@ -364,9 +366,10 @@ class BrotherPrinterPlugin(
             zoneBarcodeH - (barcodeMargin * 2)
         )
         if (barcodeBitmap != null) {
+            val barcodeX = (width - barcodeBitmap.width) / 2f
             canvas.drawBitmap(
                 barcodeBitmap,
-                (margin + barcodeMargin).toFloat(),
+                barcodeX,
                 (yBarcode + barcodeMargin).toFloat(),
                 null
             )
@@ -383,7 +386,9 @@ class BrotherPrinterPlugin(
             val b = android.graphics.Rect()
             paint.getTextBounds(parentRollId1, 0, parentRollId1.length, b)
             val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
-            canvas.drawText(parentRollId1, margin.toFloat(), y, paint)
+            val textWidth = paint.measureText(parentRollId1)
+            val x = (width - textWidth) / 2f
+            canvas.drawText(parentRollId1, x, y, paint)
         } else {
             // Two parent IDs — two lines, fit both
             val combined = "$parentRollId1  /  $parentRollId2"
@@ -396,7 +401,9 @@ class BrotherPrinterPlugin(
                 val b = android.graphics.Rect()
                 paint.getTextBounds(combined, 0, combined.length, b)
                 val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
-                canvas.drawText(combined, margin.toFloat(), y, paint)
+                val textWidth = paint.measureText(combined)
+                val x = (width - textWidth) / 2f
+                canvas.drawText(combined, x, y, paint)
             } else {
                 // Two lines
                 val size1 = fitTextToWidth(parentRollId1, availW.toFloat(), 120f, paint)
@@ -412,12 +419,21 @@ class BrotherPrinterPlugin(
                 val y1 = yParent + (lineH / 2f) + (b1.height() / 2f)
                 val y2 = yParent + lineH + (lineH / 2f) + (b2.height() / 2f)
 
-                canvas.drawText(parentRollId1, margin.toFloat(), y1, paint)
-                canvas.drawText(parentRollId2, margin.toFloat(), y2, paint)
+                val textWidth1 = paint.measureText(parentRollId1)
+                val x1 = (width - textWidth1) / 2f
+                canvas.drawText(parentRollId1, x1, y1, paint)
+
+                val textWidth2 = paint.measureText(parentRollId2)
+                val x2 = (width - textWidth2) / 2f
+                canvas.drawText(parentRollId2, x2, y2, paint)
             }
         }
 
-        return bitmap
+        val matrix = android.graphics.Matrix()
+        matrix.postRotate(90f)
+        val landscape = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        bitmap.recycle()
+        return landscape
     }
 
     /**
