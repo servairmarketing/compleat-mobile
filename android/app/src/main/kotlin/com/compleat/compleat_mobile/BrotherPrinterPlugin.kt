@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.Log
@@ -313,7 +312,7 @@ class BrotherPrinterPlugin(
     private fun byteListOf(vararg ints: Int): List<Byte> = ints.map { it.toByte() }
 
     // -------------------------------------------------------------------------
-    // Label bitmap — landscape barcode layout
+    // Label bitmap — dynamic proportional layout
     // -------------------------------------------------------------------------
 
     private fun createLabelBitmap(
@@ -322,61 +321,127 @@ class BrotherPrinterPlugin(
         parentRollId1: String,
         parentRollId2: String
     ): Bitmap {
-        // Landscape: 1296px wide × 600px tall (fits W62 at 300dpi landscape)
-        // The printer prints this landscape — no rotation needed in software
+        // 62mm × 100mm die-cut at 300dpi
+        // 62mm = 1296px (print head width, already established)
+        // 100mm = 1181px tall
         val width = 1296
-        val height = 600
+        val height = 1181
+        val margin = 24  // ~2mm at 300dpi — gives comfortable breathing room
+
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
 
+        val availW = width - (margin * 2)   // 1248px
+        val availH = height - (margin * 2)  // 1133px
+
+        // ── Zone heights (proportional) ──
+        val zoneProductH  = (availH * 0.22).toInt()   // ~249px
+        val zoneBarcodeH  = (availH * 0.52).toInt()   // ~589px
+        val zoneParentH   = availH - zoneProductH - zoneBarcodeH  // remainder ~295px
+
+        // ── Zone top Y positions ──
+        val yProduct  = margin
+        val yBarcode  = margin + zoneProductH
+        val yParent   = margin + zoneProductH + zoneBarcodeH
+
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.BLACK
 
-        // ── RIGHT SECTION: Product ID text (large bold) ──
-        paint.textSize = 120f
+        // ── ZONE 1: Product ID ──
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        val pidX = 1050f
-        val pidY = 400f
-        // Rotate canvas to draw text vertically (reading bottom-to-top)
-        canvas.save()
-        canvas.rotate(-90f, pidX, pidY)
-        canvas.drawText(productId, pidX - 200f, pidY + 40f, paint)
-        canvas.restore()
+        paint.textSize = fitTextToWidth(productId, availW.toFloat(), 200f, paint)
+        val productBounds = android.graphics.Rect()
+        paint.getTextBounds(productId, 0, productId.length, productBounds)
+        val productY = yProduct + (zoneProductH / 2f) + (productBounds.height() / 2f)
+        canvas.drawText(productId, margin.toFloat(), productY, paint)
 
-        // ── CENTER SECTION: Barcode of productId (rotated 90° to run vertically) ──
-        val barcodeBitmap = generateBarcode(productId, 600, 400)
+        // ── ZONE 2: Barcode (productId encoded) ──
+        val barcodeMargin = 8
+        val barcodeBitmap = generateBarcode(
+            productId,
+            availW - (barcodeMargin * 2),
+            zoneBarcodeH - (barcodeMargin * 2)
+        )
         if (barcodeBitmap != null) {
-            val rotMatrix = Matrix()
-            rotMatrix.postRotate(90f)
-            val rotatedBarcode = Bitmap.createBitmap(
-                barcodeBitmap, 0, 0, barcodeBitmap.width, barcodeBitmap.height, rotMatrix, true
+            canvas.drawBitmap(
+                barcodeBitmap,
+                (margin + barcodeMargin).toFloat(),
+                (yBarcode + barcodeMargin).toFloat(),
+                null
             )
             barcodeBitmap.recycle()
-            val barcodeX = (width / 2 - rotatedBarcode.width / 2).toFloat()
-            val barcodeY = (height / 2 - rotatedBarcode.height / 2).toFloat()
-            canvas.drawBitmap(rotatedBarcode, barcodeX, barcodeY, null)
-            rotatedBarcode.recycle()
         }
 
-        // ── LEFT SECTION: Parent Roll ID ──
-        paint.textSize = 80f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        val parentText = if (parentRollId2.isNotEmpty()) "$parentRollId1 / $parentRollId2" else parentRollId1
-        val parentX = 150f
-        val parentY = 400f
-        canvas.save()
-        canvas.rotate(-90f, parentX, parentY)
-        canvas.drawText(parentText, parentX - 150f, parentY + 30f, paint)
-        canvas.restore()
+        // ── ZONE 3: Parent Roll ID(s) ──
+        paint.typeface = Typeface.DEFAULT
+        val hasTwo = parentRollId2.isNotEmpty()
+
+        if (!hasTwo) {
+            // Single parent ID — one line, large
+            paint.textSize = fitTextToWidth(parentRollId1, availW.toFloat(), 160f, paint)
+            val b = android.graphics.Rect()
+            paint.getTextBounds(parentRollId1, 0, parentRollId1.length, b)
+            val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
+            canvas.drawText(parentRollId1, margin.toFloat(), y, paint)
+        } else {
+            // Two parent IDs — two lines, fit both
+            val combined = "$parentRollId1  /  $parentRollId2"
+            val singleLine = fitTextToWidth(combined, availW.toFloat(), 120f, paint)
+            val lineH = zoneParentH / 2f
+
+            // Try single line first — if font >= 60sp use it
+            if (singleLine >= 60f) {
+                paint.textSize = singleLine
+                val b = android.graphics.Rect()
+                paint.getTextBounds(combined, 0, combined.length, b)
+                val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
+                canvas.drawText(combined, margin.toFloat(), y, paint)
+            } else {
+                // Two lines
+                val size1 = fitTextToWidth(parentRollId1, availW.toFloat(), 120f, paint)
+                val size2 = fitTextToWidth(parentRollId2, availW.toFloat(), 120f, paint)
+                val fontSize = minOf(size1, size2)  // same size for both lines
+                paint.textSize = fontSize
+
+                val b1 = android.graphics.Rect()
+                paint.getTextBounds(parentRollId1, 0, parentRollId1.length, b1)
+                val b2 = android.graphics.Rect()
+                paint.getTextBounds(parentRollId2, 0, parentRollId2.length, b2)
+
+                val y1 = yParent + (lineH / 2f) + (b1.height() / 2f)
+                val y2 = yParent + lineH + (lineH / 2f) + (b2.height() / 2f)
+
+                canvas.drawText(parentRollId1, margin.toFloat(), y1, paint)
+                canvas.drawText(parentRollId2, margin.toFloat(), y2, paint)
+            }
+        }
 
         return bitmap
     }
 
+    /**
+     * Finds the largest font size where paint.measureText(text) fits within maxWidth.
+     * Starts at maxSize and steps down by 2f until it fits.
+     * Never goes below 40f.
+     */
+    private fun fitTextToWidth(text: String, maxWidth: Float, maxSize: Float, paint: Paint): Float {
+        var size = maxSize
+        paint.textSize = size
+        while (size > 40f && paint.measureText(text) > maxWidth) {
+            size -= 2f
+            paint.textSize = size
+        }
+        return size
+    }
+
     private fun generateBarcode(data: String, targetWidth: Int, targetHeight: Int): Bitmap? {
         return try {
+            val hints = mapOf(
+                com.google.zxing.EncodeHintType.MARGIN to 0
+            )
             val writer = com.google.zxing.MultiFormatWriter()
-            val matrix = writer.encode(data, com.google.zxing.BarcodeFormat.CODE_128, targetWidth, targetHeight)
+            val matrix = writer.encode(data, com.google.zxing.BarcodeFormat.CODE_128, targetWidth, targetHeight, hints)
             val barcodeWidth = matrix.width
             val barcodeHeight = matrix.height
             val pixels = IntArray(barcodeWidth * barcodeHeight)
