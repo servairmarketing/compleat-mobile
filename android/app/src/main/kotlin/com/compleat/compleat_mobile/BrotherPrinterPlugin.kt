@@ -324,7 +324,7 @@ class BrotherPrinterPlugin(
         // Native landscape: 100mm × 62mm die-cut at 300dpi
         // width  = 1181px: label length (100mm @ 300dpi) — zones run left→right
         // height = 1296px: PRINT_WIDTH_PX — bitmapToRasterRows scales this to 696 active pins
-        val width = 1181
+        val width = 1050
         val height = 1296
         val margin = 24
 
@@ -365,20 +365,22 @@ class BrotherPrinterPlugin(
 
         // ── ZONE 2: Barcode (productId encoded) — runs along label length ──
         val barcodeMargin = 8
+        val yBarcode = margin + barcodeMargin
+        val zoneBarcodeH = availH - (barcodeMargin * 2)
         val barcodeBitmap = generateBarcode(
             productId,
             zoneBarcodeW - (barcodeMargin * 2),
             availH - (barcodeMargin * 2)
         )
         if (barcodeBitmap != null) {
-            val barcodeX = (width - barcodeBitmap.width) / 2f
-            canvas.drawBitmap(
-                barcodeBitmap,
-                barcodeX,
-                (margin + barcodeMargin).toFloat(),
-                null
-            )
+            val barcodeMatrix = android.graphics.Matrix()
+            barcodeMatrix.postRotate(90f)
+            val rotatedBarcode = android.graphics.Bitmap.createBitmap(barcodeBitmap, 0, 0, barcodeBitmap.width, barcodeBitmap.height, barcodeMatrix, true)
             barcodeBitmap.recycle()
+            val barcodeX = (width - rotatedBarcode.width) / 2f
+            val barcodeY = yBarcode.toFloat() + (zoneBarcodeH - rotatedBarcode.height) / 2f
+            canvas.drawBitmap(rotatedBarcode, barcodeX, barcodeY, null)
+            rotatedBarcode.recycle()
         }
 
         // ── ZONE 3: Parent Roll ID(s) — rotated -90° (reads bottom-to-top) ──
