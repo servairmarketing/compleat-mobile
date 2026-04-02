@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/printer_service.dart';
 
@@ -16,11 +17,18 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   PrinterStatus _status = PrinterStatus.checking;
   bool _printing = false;
   Timer? _pollTimer;
+  String _version = '';
 
   @override
   void initState() {
     super.initState();
     _loadIp();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    setState(() => _version = 'v${info.version}');
   }
 
   Future<void> _loadIp() async {
@@ -233,6 +241,12 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              _version,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

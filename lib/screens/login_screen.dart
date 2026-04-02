@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../services/api_service.dart';
 import 'home_screen.dart';
 
@@ -13,6 +14,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _loading = false;
   String? _error;
+  String _version = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    setState(() => _version = 'v${info.version}');
+  }
 
   Future<void> _login() async {
     setState(() { _loading = true; _error = null; });
@@ -102,6 +115,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
                     ),
                   ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  _version,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
