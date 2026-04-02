@@ -321,119 +321,126 @@ class BrotherPrinterPlugin(
         parentRollId1: String,
         parentRollId2: String
     ): Bitmap {
-        // 62mm × 100mm die-cut at 300dpi
-        // 62mm = 1296px (print head width, already established)
-        // 100mm = 1181px tall
-        val width = 1296
-        val height = 1181
-        val margin = 24  // ~2mm at 300dpi — gives comfortable breathing room
+        // Native landscape: 100mm × 62mm die-cut at 300dpi
+        // width  = 1181px: label length (100mm @ 300dpi) — zones run left→right
+        // height = 1296px: PRINT_WIDTH_PX — bitmapToRasterRows scales this to 696 active pins
+        val width = 1181
+        val height = 1296
+        val margin = 24
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
 
-        val availW = width - (margin * 2)   // 1248px
-        val availH = height - (margin * 2)  // 1133px
+        val availW = width - (margin * 2)   // 1133px — along label length
+        val availH = height - (margin * 2)  // 1248px — across label width (text fits here)
 
-        // ── Zone heights (proportional) ──
-        val zoneProductH  = (availH * 0.22).toInt()   // ~249px
-        val zoneBarcodeH  = (availH * 0.52).toInt()   // ~589px
-        val zoneParentH   = availH - zoneProductH - zoneBarcodeH  // remainder ~295px
+        // ── Zone widths (proportional across availW = 1133px) ──
+        val zoneProductW = (availW * 0.22).toInt()
+        val zoneBarcodeW = (availW * 0.52).toInt()
+        val zoneParentW  = availW - zoneProductW - zoneBarcodeW
 
-        // ── Zone top Y positions ──
-        val yProduct  = margin
-        val yBarcode  = margin + zoneProductH
-        val yParent   = margin + zoneProductH + zoneBarcodeH
+        // ── Zone left X positions ──
+        val xProduct = margin
+        val xBarcode = margin + zoneProductW
+        val xParent  = margin + zoneProductW + zoneBarcodeW
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.BLACK
 
-        // ── ZONE 1: Product ID ──
+        // Vertical centre of content area — rotation pivot Y for all text
+        val centerY = margin + availH / 2f
+
+        // ── ZONE 1: Product ID — rotated -90° (reads bottom-to-top) ──
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        paint.textSize = fitTextToWidth(productId, availW.toFloat(), 200f, paint)
+        paint.textSize = fitTextToWidth(productId, availH.toFloat(), 200f, paint)
         val productBounds = android.graphics.Rect()
         paint.getTextBounds(productId, 0, productId.length, productBounds)
-        val productY = yProduct + (zoneProductH / 2f) + (productBounds.height() / 2f)
-        val productTextWidth = paint.measureText(productId)
-        val productX = (width - productTextWidth) / 2f
-        canvas.drawText(productId, productX, productY, paint)
+        val productW = paint.measureText(productId)
+        val pivotX1 = xProduct + zoneProductW / 2f
+        canvas.save()
+        canvas.rotate(-90f, pivotX1, centerY)
+        canvas.drawText(productId, pivotX1 - productW / 2f, centerY + productBounds.height() / 2f, paint)
+        canvas.restore()
 
-        // ── ZONE 2: Barcode (productId encoded) ──
+        // ── ZONE 2: Barcode (productId encoded) — runs along label length ──
         val barcodeMargin = 8
         val barcodeBitmap = generateBarcode(
             productId,
-            availW - (barcodeMargin * 2),
-            zoneBarcodeH - (barcodeMargin * 2)
+            zoneBarcodeW - (barcodeMargin * 2),
+            availH - (barcodeMargin * 2)
         )
         if (barcodeBitmap != null) {
             val barcodeX = (width - barcodeBitmap.width) / 2f
             canvas.drawBitmap(
                 barcodeBitmap,
                 barcodeX,
-                (yBarcode + barcodeMargin).toFloat(),
+                (margin + barcodeMargin).toFloat(),
                 null
             )
             barcodeBitmap.recycle()
         }
 
-        // ── ZONE 3: Parent Roll ID(s) ──
+        // ── ZONE 3: Parent Roll ID(s) — rotated -90° (reads bottom-to-top) ──
         paint.typeface = Typeface.DEFAULT
         val hasTwo = parentRollId2.isNotEmpty()
+        val pivotX3 = xParent + zoneParentW / 2f
 
         if (!hasTwo) {
             // Single parent ID — one line, large
-            paint.textSize = fitTextToWidth(parentRollId1, availW.toFloat(), 160f, paint)
+            paint.textSize = fitTextToWidth(parentRollId1, availH.toFloat(), 160f, paint)
             val b = android.graphics.Rect()
             paint.getTextBounds(parentRollId1, 0, parentRollId1.length, b)
-            val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
-            val textWidth = paint.measureText(parentRollId1)
-            val x = (width - textWidth) / 2f
-            canvas.drawText(parentRollId1, x, y, paint)
+            val w = paint.measureText(parentRollId1)
+            canvas.save()
+            canvas.rotate(-90f, pivotX3, centerY)
+            canvas.drawText(parentRollId1, pivotX3 - w / 2f, centerY + b.height() / 2f, paint)
+            canvas.restore()
         } else {
-            // Two parent IDs — two lines, fit both
+            // Two parent IDs — try single combined line, fall back to two lines
             val combined = "$parentRollId1  /  $parentRollId2"
-            val singleLine = fitTextToWidth(combined, availW.toFloat(), 120f, paint)
-            val lineH = zoneParentH / 2f
+            val singleLine = fitTextToWidth(combined, availH.toFloat(), 120f, paint)
+            val halfZoneW = zoneParentW / 2f
 
-            // Try single line first — if font >= 60sp use it
             if (singleLine >= 60f) {
                 paint.textSize = singleLine
                 val b = android.graphics.Rect()
                 paint.getTextBounds(combined, 0, combined.length, b)
-                val y = yParent + (zoneParentH / 2f) + (b.height() / 2f)
-                val textWidth = paint.measureText(combined)
-                val x = (width - textWidth) / 2f
-                canvas.drawText(combined, x, y, paint)
+                val w = paint.measureText(combined)
+                canvas.save()
+                canvas.rotate(-90f, pivotX3, centerY)
+                canvas.drawText(combined, pivotX3 - w / 2f, centerY + b.height() / 2f, paint)
+                canvas.restore()
             } else {
-                // Two lines
-                val size1 = fitTextToWidth(parentRollId1, availW.toFloat(), 120f, paint)
-                val size2 = fitTextToWidth(parentRollId2, availW.toFloat(), 120f, paint)
-                val fontSize = minOf(size1, size2)  // same size for both lines
+                // Two sub-zones side by side within the parent zone
+                val size1 = fitTextToWidth(parentRollId1, availH.toFloat(), 120f, paint)
+                val size2 = fitTextToWidth(parentRollId2, availH.toFloat(), 120f, paint)
+                val fontSize = minOf(size1, size2)
                 paint.textSize = fontSize
 
                 val b1 = android.graphics.Rect()
                 paint.getTextBounds(parentRollId1, 0, parentRollId1.length, b1)
                 val b2 = android.graphics.Rect()
                 paint.getTextBounds(parentRollId2, 0, parentRollId2.length, b2)
+                val w1 = paint.measureText(parentRollId1)
+                val w2 = paint.measureText(parentRollId2)
 
-                val y1 = yParent + (lineH / 2f) + (b1.height() / 2f)
-                val y2 = yParent + lineH + (lineH / 2f) + (b2.height() / 2f)
+                val pivotX3a = xParent + halfZoneW / 2f
+                val pivotX3b = xParent + halfZoneW + halfZoneW / 2f
 
-                val textWidth1 = paint.measureText(parentRollId1)
-                val x1 = (width - textWidth1) / 2f
-                canvas.drawText(parentRollId1, x1, y1, paint)
+                canvas.save()
+                canvas.rotate(-90f, pivotX3a, centerY)
+                canvas.drawText(parentRollId1, pivotX3a - w1 / 2f, centerY + b1.height() / 2f, paint)
+                canvas.restore()
 
-                val textWidth2 = paint.measureText(parentRollId2)
-                val x2 = (width - textWidth2) / 2f
-                canvas.drawText(parentRollId2, x2, y2, paint)
+                canvas.save()
+                canvas.rotate(-90f, pivotX3b, centerY)
+                canvas.drawText(parentRollId2, pivotX3b - w2 / 2f, centerY + b2.height() / 2f, paint)
+                canvas.restore()
             }
         }
 
-        val matrix = android.graphics.Matrix()
-        matrix.postRotate(90f)
-        val landscape = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        bitmap.recycle()
-        return landscape
+        return bitmap
     }
 
     /**
