@@ -325,8 +325,8 @@ class BrotherPrinterPlugin(
         // Width = 696px (PRINT_WIDTH_PX — hardware constant, never change)
         // Height = 1181px (100mm × 300dpi / 25.4)
         // 1mm margin = 12px at 300dpi
-        val width   = 696
-        val height  = 1181
+        val width   = 1181
+        val height  = 696
         val margin  = 12
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
