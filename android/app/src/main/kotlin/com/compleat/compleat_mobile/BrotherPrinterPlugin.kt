@@ -277,7 +277,7 @@ class BrotherPrinterPlugin(
      */
     private fun bitmapToRasterRows(src: Bitmap): List<ByteArray> {
         val bmp = if (src.width != PRINT_WIDTH_PX)
-            Bitmap.createScaledBitmap(src, PRINT_WIDTH_PX, src.height, true)
+            Bitmap.createScaledBitmap(src, PRINT_WIDTH_PX, (src.height.toFloat() * PRINT_WIDTH_PX / src.width).toInt(), true)
         else src
 
         val rows   = mutableListOf<ByteArray>()
@@ -440,7 +440,11 @@ class BrotherPrinterPlugin(
             }
         }
 
-        return bitmap
+        val matrix = android.graphics.Matrix()
+        matrix.postRotate(90f)
+        val landscape = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        bitmap.recycle()
+        return landscape
     }
 
     /**

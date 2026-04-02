@@ -53,7 +53,8 @@ Summary:
 - Orientation: LANDSCAPE
 - Bitmap returned by createLabelBitmap() must be exactly PRINT_WIDTH_PX (1296) wide
 - Barcode encodes productId — never parentRollId
-- Functions that must never be modified: bitmapToRasterRows(), buildRasterJob(), printLabelRawTcp(), byteListOf()
+- Functions that must never be modified: buildRasterJob(), printLabelRawTcp(), byteListOf()
+- bitmapToRasterRows() may only be modified to fix proportional scaling — no other changes permitted
 
 ## Rules for Every Instruction
 1. Read PROJECT_SPEC.md and LABEL_SPEC.md before touching any file
