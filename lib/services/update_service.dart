@@ -1,8 +1,7 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:android_intent_plus/android_intent_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class UpdateService {
   static const String _repoOwner = 'servairmarketing';
@@ -49,7 +48,7 @@ class UpdateService {
     String url,
     String version,
     Function(double) onProgress,
-    Function() onComplete,
+    Function(String) onComplete,
     Function(String) onError,
   ) async {
     try {
@@ -63,17 +62,16 @@ class UpdateService {
           if (total > 0) onProgress(received / total);
         },
       );
-      onComplete();
-      await Future.delayed(const Duration(milliseconds: 500));
-      final intent = AndroidIntent(
-        action: 'android.intent.action.VIEW',
-        data: 'file://$filePath',
-        type: 'application/vnd.android.package-archive',
-        flags: [0x10000000],
-      );
-      await intent.launch();
+      onComplete(filePath);
     } catch (e) {
       onError(e.toString());
+    }
+  }
+
+  static Future<void> installApk(String filePath) async {
+    final uri = Uri.file(filePath);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
     }
   }
 }

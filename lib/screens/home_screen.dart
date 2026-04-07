@@ -64,9 +64,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     setDialogState(() => _downloadProgress = progress);
                     setState(() => _downloadProgress = progress);
                   },
-                  () {
+                  (filePath) {
                     Navigator.pop(ctx);
                     setState(() { _downloading = false; _downloadProgress = 0; });
+                    UpdateService.installApk(filePath);
                   },
                   (error) {
                     Navigator.pop(ctx);
