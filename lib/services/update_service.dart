@@ -74,9 +74,12 @@ class UpdateService {
   }
 
   static Future<void> installApk(String filePath) async {
+    print('DEBUG installApk called with: $filePath');
     try {
       final file = File(filePath);
-      if (!await file.exists()) return;
+      final exists = await file.exists();
+      print('DEBUG file exists: $exists');
+      if (!exists) return;
       final intent = AndroidIntent(
         action: 'android.intent.action.VIEW',
         data: file.uri.toString(),
