@@ -1,5 +1,4 @@
-import 'dart:io';
-import 'package:android_intent_plus/android_intent.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -76,19 +75,10 @@ class UpdateService {
   static Future<void> installApk(String filePath) async {
     print('DEBUG installApk called with: $filePath');
     try {
-      final file = File(filePath);
-      final exists = await file.exists();
-      print('DEBUG file exists: $exists');
-      if (!exists) return;
-      final intent = AndroidIntent(
-        action: 'android.intent.action.VIEW',
-        data: file.uri.toString(),
-        type: 'application/vnd.android.package-archive',
-        flags: [0x10000000, 0x00000001],
-      );
-      await intent.launch();
+      final result = await OpenFilex.open(filePath, type: 'application/vnd.android.package-archive');
+      print('DEBUG OpenFilex result: \${result.type} \${result.message}');
     } catch (e) {
-      print('DEBUG installApk error: $e');
+      print('DEBUG installApk error: \$e');
     }
   }
 }
