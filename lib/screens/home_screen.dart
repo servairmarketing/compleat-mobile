@@ -26,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkForUpdate() async {
     final update = await UpdateService.checkForUpdate();
+    print('DEBUG update result: $update');
     if (!mounted) return;
     if (update == null) {
       ScaffoldMessenger.of(context).showSnackBar(

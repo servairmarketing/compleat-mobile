@@ -15,11 +15,14 @@ class UpdateService {
         '$_githubApiBase/repos/$_repoOwner/$_repoName/releases/latest',
         options: Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
       );
+      print('DEBUG GitHub API status: ${response.statusCode}');
+      print('DEBUG tag_name: ${response.data['tag_name']}');
       if (response.statusCode != 200) return null;
       final data = response.data;
       final latestVersion = (data['tag_name'] as String).replaceAll('v', '');
       final info = await PackageInfo.fromPlatform();
       final currentVersion = info.version;
+      print('DEBUG latestVersion: $latestVersion currentVersion: $currentVersion isNewer: ${_isNewer(latestVersion, currentVersion)}');
       if (_isNewer(latestVersion, currentVersion)) {
         final assets = data['assets'] as List;
         if (assets.isEmpty) return null;
@@ -28,6 +31,7 @@ class UpdateService {
       }
       return null;
     } catch (e) {
+      print('DEBUG checkForUpdate exception: $e');
       return null;
     }
   }
