@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:android_intent_plus/android_intent_plus.dart';
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
