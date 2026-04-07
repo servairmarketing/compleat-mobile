@@ -339,8 +339,8 @@ class BrotherPrinterPlugin(
 
         // Zone heights — proportional of availH
         // Product ID: 20%, Barcode: 55%, Parent Roll: 25%
-        val zoneProductH = (availH * 0.20f).toInt()
-        val zoneBarcodeH = (availH * 0.55f).toInt()
+        val zoneProductH = (availH * 0.25f).toInt()
+        val zoneBarcodeH = (availH * 0.45f).toInt()
         val zoneParentH  = (availH - zoneProductH - zoneBarcodeH)
 
         // Zone top Y positions (all offset by margin)
@@ -363,7 +363,7 @@ class BrotherPrinterPlugin(
         canvas.drawText(productId, productX, productY, paint)
 
         // ── ZONE 2: Barcode — fills zone with padding, encodes productId ──
-        val barcodePad = 8
+        val barcodePad = 40
         val barcodeW = (availW - barcodePad * 2).toInt()
         val barcodeH = (zoneBarcodeH - barcodePad * 2)
         val barcodeBitmap = generateBarcode(productId, barcodeW, barcodeH)
