@@ -37,23 +37,14 @@ jobs:
             ${{ runner.os }}-gradle-
       - run: flutter pub get
       - run: flutter build apk --debug
-      - name: Get version from pubspec
-        id: version
-        run: echo "VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')" >> $GITHUB_OUTPUT
-      - name: Delete existing release if exists
-        run: |
-          gh release delete v${{ steps.version.outputs.VERSION }} --yes 2>/dev/null || true
+      - name: Get version and create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create GitHub Release
         run: |
-          gh release create v${{ steps.version.outputs.VERSION }} \
-            build/app/outputs/flutter-apk/app-debug.apk \
-            --title "Compleat IMS v${{ steps.version.outputs.VERSION }}" \
-            --notes "Build ${{ github.sha }}" \
-            --latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          echo "Version: $VERSION"
+          gh release delete "v$VERSION" --yes 2>/dev/null || true
+          gh release create "v$VERSION" build/app/outputs/flutter-apk/app-debug.apk --title "Compleat IMS v$VERSION" --notes "Build $GITHUB_SHA" --latest
       - uses: actions/upload-artifact@v4
         with:
           name: compleat-mobile-apk
