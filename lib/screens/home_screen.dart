@@ -26,7 +26,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkForUpdate() async {
     final update = await UpdateService.checkForUpdate();
-    if (update == null || !mounted) return;
+    if (!mounted) return;
+    if (update == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are on the latest version.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
     final version = update['version'];
     final url = update['url'];
     showDialog(
