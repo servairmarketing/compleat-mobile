@@ -21,7 +21,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _checkForUpdate();
     _loadProfile();
   }
 
@@ -176,6 +175,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: const Color(0xFFe53935),
                         onTap: () => _navigate(const PrinterSettingsScreen())),
                   ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _downloading ? null : _checkForUpdate,
+                  icon: _downloading
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.system_update),
+                  label: Text(_downloading ? 'Downloading...' : 'Check for Update'),
                 ),
               ),
             ),
