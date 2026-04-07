@@ -79,7 +79,7 @@ class UpdateService {
       if (!await file.exists()) return;
       final intent = AndroidIntent(
         action: 'android.intent.action.VIEW',
-        data: Uri.fromFile(file).toString(),
+        data: file.uri.toString(),
         type: 'application/vnd.android.package-archive',
         flags: [0x10000000, 0x00000001],
       );
