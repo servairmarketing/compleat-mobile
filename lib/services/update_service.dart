@@ -1,7 +1,8 @@
+import 'dart:io';
+import 'package:android_intent_plus/android_intent_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class UpdateService {
   static const String _repoOwner = 'servairmarketing';
@@ -73,9 +74,18 @@ class UpdateService {
   }
 
   static Future<void> installApk(String filePath) async {
-    final uri = Uri.file(filePath);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) return;
+      final intent = AndroidIntent(
+        action: 'android.intent.action.VIEW',
+        data: Uri.fromFile(file).toString(),
+        type: 'application/vnd.android.package-archive',
+        flags: [0x10000000, 0x00000001],
+      );
+      await intent.launch();
+    } catch (e) {
+      print('DEBUG installApk error: $e');
     }
   }
 }
