@@ -42,6 +42,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     try {
     final vRes = await ApiService.get('/masters/vendors');
     final pRes = await ApiService.get('/masters/products');
+    print('DEBUG products response: ${pRes.toString().substring(0, pRes.toString().length.clamp(0, 500))}');
 
     if (vRes['error'] == 'session_expired' || pRes['error'] == 'session_expired') {
       if (mounted) Navigator.pushReplacement(context,
@@ -78,6 +79,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         _basisWeights = basisWts;
         _widths = widths;
       });
+      print('DEBUG widths: $_widths');
+      print('DEBUG materialTypes: $_materialTypes');
+      print('DEBUG basisWeights: $_basisWeights');
     } else {
       final cached = await LocalDb.getCachedMasters('products');
       if (cached != null) {
