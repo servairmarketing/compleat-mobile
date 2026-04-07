@@ -14,7 +14,6 @@ class ReceiveScreen extends StatefulWidget {
 class _ReceiveScreenState extends State<ReceiveScreen> {
   final _rollIdController = TextEditingController();
   final _poController = TextEditingController();
-  final _widthController = TextEditingController();
   final _lengthController = TextEditingController();
   final _weightController = TextEditingController();
   final _notesController = TextEditingController();
@@ -22,9 +21,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   List<Map> _vendors = [];
   List<String> _materialTypes = [];
   List<String> _basisWeights = [];
+  List<String> _widths = [];
   String? _selectedVendor;
   String? _selectedMaterialType;
   String? _selectedBasisWeight;
+  String? _selectedWidth;
   bool _loading = false;
   bool _submitting = false;
   String? _message;
@@ -67,9 +68,15 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           .where((v) => v.isNotEmpty)
           .toSet().toList()
           ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
+      final widths = products
+          .map((p) => p['width']?.toString() ?? '')
+          .where((v) => v.isNotEmpty)
+          .toSet().toList()
+          ..sort((a, b) => (double.tryParse(a) ?? 0).compareTo(double.tryParse(b) ?? 0));
       setState(() {
         _materialTypes = matTypes;
         _basisWeights = basisWts;
+        _widths = widths;
       });
     } else {
       final cached = await LocalDb.getCachedMasters('products');
@@ -84,9 +91,15 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             .where((v) => v.isNotEmpty)
             .toSet().toList()
             ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
+        final widths = products
+            .map((p) => p['width']?.toString() ?? '')
+            .where((v) => v.isNotEmpty)
+            .toSet().toList()
+            ..sort((a, b) => (double.tryParse(a) ?? 0).compareTo(double.tryParse(b) ?? 0));
         setState(() {
           _materialTypes = matTypes;
           _basisWeights = basisWts;
+          _widths = widths;
         });
       }
     }
@@ -104,7 +117,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       });
       return;
     }
-    if (_widthController.text.trim().isEmpty ||
+    if (_selectedWidth == null ||
         _lengthController.text.trim().isEmpty ||
         _weightController.text.trim().isEmpty) {
       setState(() {
@@ -120,7 +133,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       'po_number': _poController.text.trim(),
       'material_type': _selectedMaterialType,
       'basis_weight': double.tryParse(_selectedBasisWeight!),
-      'width': double.tryParse(_widthController.text),
+      'width': double.tryParse(_selectedWidth ?? ''),
       'length': double.tryParse(_lengthController.text),
       'weight': double.tryParse(_weightController.text),
       'notes': _notesController.text.trim(),
@@ -139,7 +152,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   void _clearForm() {
     _rollIdController.clear();
     _poController.clear();
-    _widthController.clear();
+    _selectedWidth = null;
     _lengthController.clear();
     _weightController.clear();
     _notesController.clear();
@@ -209,7 +222,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 const SizedBox(height: 14),
 
                 Row(children: [
-                  Expanded(child: _buildField('Width (in) *', _widthController, numeric: true)),
+                  Expanded(
+                    child: _buildSimpleDropdown(
+                      label: 'Width (in) *',
+                      items: _widths,
+                      value: _selectedWidth,
+                      onChanged: (v) => setState(() => _selectedWidth = v),
+                    ),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(child: _buildField('Length (ft) *', _lengthController, numeric: true)),
                 ]),
