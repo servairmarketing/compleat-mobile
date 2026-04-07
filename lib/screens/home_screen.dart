@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'printer_settings_screen.dart';
 import '../services/api_service.dart';
+import '../services/update_service.dart';
 import 'login_screen.dart';
 import 'receive_screen.dart';
 import 'production_screen.dart';
@@ -14,11 +15,74 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _userProfile;
+  double _downloadProgress = 0;
+  bool _downloading = false;
 
   @override
   void initState() {
     super.initState();
+    _checkForUpdate();
     _loadProfile();
+  }
+
+  Future<void> _checkForUpdate() async {
+    final update = await UpdateService.checkForUpdate();
+    if (update == null || !mounted) return;
+    final version = update['version'];
+    final url = update['url'];
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Update Available'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Version $version is available.'),
+              if (_downloading) ...[
+                const SizedBox(height: 16),
+                LinearProgressIndicator(value: _downloadProgress),
+                const SizedBox(height: 8),
+                Text('${(_downloadProgress * 100).toStringAsFixed(0)}% downloaded'),
+              ],
+            ],
+          ),
+          actions: _downloading ? [] : [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setDialogState(() => _downloading = true);
+                setState(() => _downloading = true);
+                UpdateService.downloadAndInstall(
+                  url, version,
+                  (progress) {
+                    setDialogState(() => _downloadProgress = progress);
+                    setState(() => _downloadProgress = progress);
+                  },
+                  () {
+                    Navigator.pop(ctx);
+                    setState(() { _downloading = false; _downloadProgress = 0; });
+                  },
+                  (error) {
+                    Navigator.pop(ctx);
+                    setState(() { _downloading = false; _downloadProgress = 0; });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Update failed: $error')),
+                    );
+                  },
+                );
+              },
+              child: const Text('Update Now'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadProfile() async {
