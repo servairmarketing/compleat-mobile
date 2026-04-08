@@ -35,8 +35,19 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/compleat-release.jks
       - run: flutter pub get
-      - run: flutter build apk --debug
+      - name: Build signed APK
+        run: |
+          flutter build apk --release \
+            --dart-define=KEYSTORE_PATH=compleat-release.jks
+        env:
+          STORE_FILE: compleat-release.jks
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       - name: Get version and create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,8 +55,12 @@ jobs:
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
           echo "Version: $VERSION"
           gh release delete "v$VERSION" --yes 2>/dev/null || true
-          gh release create "v$VERSION" build/app/outputs/flutter-apk/app-debug.apk --title "Compleat IMS v$VERSION" --notes "Build $GITHUB_SHA" --latest
+          gh release create "v$VERSION" \
+            build/app/outputs/flutter-apk/app-release.apk \
+            --title "Compleat IMS v$VERSION" \
+            --notes "Build $GITHUB_SHA" \
+            --latest
       - uses: actions/upload-artifact@v4
         with:
           name: compleat-mobile-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
