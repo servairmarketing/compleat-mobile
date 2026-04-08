@@ -74,6 +74,25 @@ class ApiService {
     }
   }
 
+  static Future<List<dynamic>> getCrmAccounts() async {
+    try {
+      final token = await getToken();
+      final response = await http.get(
+        Uri.parse('$API_BASE/crm/accounts'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
       final response = await http.post(
