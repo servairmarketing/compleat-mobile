@@ -6,7 +6,6 @@ import 'login_screen.dart';
 import 'receive_screen.dart';
 import 'production_screen.dart';
 import 'history_screen.dart';
-import 'sales/sales_home_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -185,14 +184,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         description: 'Configure label printer',
                         color: const Color(0xFFe53935),
                         onTap: () => _navigate(const PrinterSettingsScreen())),
-                    if (role == 'sales' || isAdmin || modules.contains('sales'))
-                      _MenuCard(
-                        icon: Icons.map_rounded,
-                        label: 'Sales & CRM',
-                        description: 'Customer map & account management',
-                        color: const Color(0xFF7c3aed),
-                        onTap: () => _navigate(const SalesHomeScreen()),
-                      ),
                   ],
                 ),
               ),

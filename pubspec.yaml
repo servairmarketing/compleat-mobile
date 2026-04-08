@@ -21,8 +21,6 @@ dependencies:
   package_info_plus: ^4.2.0
   dio: ^5.4.0
   open_filex: ^4.3.4
-  flutter_map: ^6.1.0
-  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:
