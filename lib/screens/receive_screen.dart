@@ -40,74 +40,50 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   Future<void> _loadMasters() async {
     setState(() => _loading = true);
     try {
-    final vRes = await ApiService.get('/masters/vendors');
-    final pRes = await ApiService.get('/masters/products');
-    print('DEBUG products response: ${pRes.toString().substring(0, pRes.toString().length.clamp(0, 500))}');
+      final vRes = await ApiService.get('/masters/vendors');
+      final wRes = await ApiService.get('/masters/widths');
+      final mRes = await ApiService.get('/masters/material_types');
+      final bRes = await ApiService.get('/masters/basis_weights');
 
-    if (vRes['error'] == 'session_expired' || pRes['error'] == 'session_expired') {
-      if (mounted) Navigator.pushReplacement(context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()));
-      return;
-    }
-    if (vRes['records'] != null) {
-      await LocalDb.cacheMasters('vendors', jsonEncode(vRes['records']));
-      setState(() => _vendors = List<Map>.from(vRes['records']));
-    } else {
-      final cached = await LocalDb.getCachedMasters('vendors');
-      if (cached != null) setState(() => _vendors = List<Map>.from(jsonDecode(cached)));
-    }
-
-    if (pRes['records'] != null) {
-      await LocalDb.cacheMasters('products', jsonEncode(pRes['records']));
-      final products = List<Map>.from(pRes['records']);
-      final matTypes = products
-          .map((p) => p['material_type']?.toString() ?? '')
-          .where((v) => v.isNotEmpty)
-          .toSet().toList()..sort();
-      final basisWts = products
-          .map((p) => p['basis_weight']?.toString() ?? '')
-          .where((v) => v.isNotEmpty)
-          .toSet().toList()
-          ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
-      final widths = products
-          .map((p) => p['width']?.toString() ?? '')
-          .where((v) => v.isNotEmpty)
-          .toSet().toList()
-          ..sort((a, b) => (double.tryParse(a) ?? 0).compareTo(double.tryParse(b) ?? 0));
-      setState(() {
-        _materialTypes = matTypes;
-        _basisWeights = basisWts;
-        _widths = widths;
-      });
-      print('DEBUG widths: $_widths');
-      print('DEBUG materialTypes: $_materialTypes');
-      print('DEBUG basisWeights: $_basisWeights');
-    } else {
-      final cached = await LocalDb.getCachedMasters('products');
-      if (cached != null) {
-        final products = List<Map>.from(jsonDecode(cached));
-        final matTypes = products
-            .map((p) => p['material_type']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toSet().toList()..sort();
-        final basisWts = products
-            .map((p) => p['basis_weight']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toSet().toList()
-            ..sort((a, b) => double.tryParse(a)!.compareTo(double.tryParse(b)!));
-        final widths = products
-            .map((p) => p['width']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toSet().toList()
-            ..sort((a, b) => (double.tryParse(a) ?? 0).compareTo(double.tryParse(b) ?? 0));
-        setState(() {
-          _materialTypes = matTypes;
-          _basisWeights = basisWts;
-          _widths = widths;
-        });
+      if (vRes['error'] == 'session_expired') {
+        if (mounted) Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()));
+        return;
       }
-    }
-    setState(() => _loading = false);
+
+      if (vRes['records'] != null) {
+        await LocalDb.cacheMasters('vendors', jsonEncode(vRes['records']));
+        setState(() => _vendors = List<Map>.from(vRes['records']));
+      } else {
+        final cached = await LocalDb.getCachedMasters('vendors');
+        if (cached != null) setState(() => _vendors = List<Map>.from(jsonDecode(cached)));
+      }
+
+      if (wRes['values'] != null) {
+        await LocalDb.cacheMasters('widths', jsonEncode(wRes['values']));
+        setState(() => _widths = List<String>.from(wRes['values']));
+      } else {
+        final cached = await LocalDb.getCachedMasters('widths');
+        if (cached != null) setState(() => _widths = List<String>.from(jsonDecode(cached)));
+      }
+
+      if (mRes['values'] != null) {
+        await LocalDb.cacheMasters('material_types', jsonEncode(mRes['values']));
+        setState(() => _materialTypes = List<String>.from(mRes['values']));
+      } else {
+        final cached = await LocalDb.getCachedMasters('material_types');
+        if (cached != null) setState(() => _materialTypes = List<String>.from(jsonDecode(cached)));
+      }
+
+      if (bRes['values'] != null) {
+        await LocalDb.cacheMasters('basis_weights', jsonEncode(bRes['values']));
+        setState(() => _basisWeights = List<String>.from(bRes['values']));
+      } else {
+        final cached = await LocalDb.getCachedMasters('basis_weights');
+        if (cached != null) setState(() => _basisWeights = List<String>.from(jsonDecode(cached)));
+      }
+
+      setState(() => _loading = false);
     } catch (e) {
       setState(() => _loading = false);
     }
