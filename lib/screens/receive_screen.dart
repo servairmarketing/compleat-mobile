@@ -112,7 +112,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       'vendor_id': _selectedVendor,
       'po_number': _poController.text.trim(),
       'material_type': _selectedMaterialType,
-      'basis_weight': double.tryParse(_selectedBasisWeight!),
+      'basis_weight': _selectedBasisWeight,
       'width': double.tryParse(_selectedWidth ?? ''),
       'length': double.tryParse(_lengthController.text),
       'weight': double.tryParse(_weightController.text),
