@@ -189,7 +189,17 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   label: 'Material Type *',
                   items: _materialTypes,
                   value: _selectedMaterialType,
-                  onChanged: (v) => setState(() => _selectedMaterialType = v),
+                  enabled: _selectedBasisWeight != 'Crepe' || _selectedMaterialType == 'Crepe',
+                  onChanged: (v) {
+                    setState(() {
+                      _selectedMaterialType = v;
+                      if (v == 'Crepe') {
+                        _selectedBasisWeight = 'Crepe';
+                      } else if (_selectedBasisWeight == 'Crepe') {
+                        _selectedBasisWeight = null;
+                      }
+                    });
+                  },
                 ),
                 const SizedBox(height: 14),
 
@@ -197,7 +207,17 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   label: 'Basis Weight *',
                   items: _basisWeights,
                   value: _selectedBasisWeight,
-                  onChanged: (v) => setState(() => _selectedBasisWeight = v),
+                  enabled: _selectedMaterialType != 'Crepe' || _selectedBasisWeight == 'Crepe',
+                  onChanged: (v) {
+                    setState(() {
+                      _selectedBasisWeight = v;
+                      if (v == 'Crepe') {
+                        _selectedMaterialType = 'Crepe';
+                      } else if (_selectedMaterialType == 'Crepe') {
+                        _selectedMaterialType = null;
+                      }
+                    });
+                  },
                 ),
                 const SizedBox(height: 14),
 
@@ -320,8 +340,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     required List<String> items,
     required String? value,
     required Function(String?) onChanged,
+    bool enabled = true,
   }) {
     return DropdownSearch<String>(
+      enabled: enabled,
       items: items,
       selectedItem: value,
       dropdownDecoratorProps: DropDownDecoratorProps(
