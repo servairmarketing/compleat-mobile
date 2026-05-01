@@ -354,19 +354,45 @@ class BrotherPrinterPlugin(
             parentBc.recycle()
         }
 
-        // ── Zone 2: Product ID text (580 × 450 at x=240..820, y=20..470) ──
+        // ── Zone 2: Product ID text (580 × 526 at x=240..820, y=20..546) ──
+        // Rendered on 2 lines split at the first "-": line 1 includes the "-",
+        // line 2 is the remainder. Each line uses fitTextToWidth independently
+        // so the characters are as large as possible. Falls back to single-line
+        // render if no "-" is present in productId.
         val prodTextX = 240f
         val prodTextY = 20f
         val prodTextW = 580f
-        val prodTextH = 450f
+        val prodTextH = 526f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        val prodMaxFont = prodTextH * 0.75f
-        paint.textSize = fitTextToWidth(productId, prodTextW, prodMaxFont, paint)
-        val prodBounds = android.graphics.Rect()
-        paint.getTextBounds(productId, 0, productId.length, prodBounds)
-        val prodX = prodTextX + (prodTextW - paint.measureText(productId)) / 2f
-        val prodY = prodTextY + (prodTextH + prodBounds.height()) / 2f
-        canvas.drawText(productId, prodX, prodY, paint)
+        val dashIdx = productId.indexOf('-')
+        if (dashIdx >= 0) {
+            val line1 = productId.substring(0, dashIdx + 1)
+            val line2 = productId.substring(dashIdx + 1)
+            val lineH = prodTextH / 2f
+            val lineMaxFont = lineH * 0.85f
+
+            paint.textSize = fitTextToWidth(line1, prodTextW, lineMaxFont, paint)
+            val l1Bounds = android.graphics.Rect()
+            paint.getTextBounds(line1, 0, line1.length, l1Bounds)
+            val l1X = prodTextX + (prodTextW - paint.measureText(line1)) / 2f
+            val l1Y = prodTextY + (lineH + l1Bounds.height()) / 2f
+            canvas.drawText(line1, l1X, l1Y, paint)
+
+            paint.textSize = fitTextToWidth(line2, prodTextW, lineMaxFont, paint)
+            val l2Bounds = android.graphics.Rect()
+            paint.getTextBounds(line2, 0, line2.length, l2Bounds)
+            val l2X = prodTextX + (prodTextW - paint.measureText(line2)) / 2f
+            val l2Y = prodTextY + lineH + (lineH + l2Bounds.height()) / 2f
+            canvas.drawText(line2, l2X, l2Y, paint)
+        } else {
+            val prodMaxFont = prodTextH * 0.75f
+            paint.textSize = fitTextToWidth(productId, prodTextW, prodMaxFont, paint)
+            val prodBounds = android.graphics.Rect()
+            paint.getTextBounds(productId, 0, productId.length, prodBounds)
+            val prodX = prodTextX + (prodTextW - paint.measureText(productId)) / 2f
+            val prodY = prodTextY + (prodTextH + prodBounds.height()) / 2f
+            canvas.drawText(productId, prodX, prodY, paint)
+        }
 
         // ── Zone 3: Product ID barcode strip (250 × 450 at x=840..1090, y=20..470) ──
         // Same rotation pattern as Zone 1: generate 450 × 250 then rotate 90° CCW.
@@ -385,11 +411,14 @@ class BrotherPrinterPlugin(
             prodBc.recycle()
         }
 
-        // ── Zone 4: Parent ID text (850 × 186 at x=240..1090, y=490..676) ──
+        // ── Zone 4: Parent ID text (850 × 110 at x=240..1090, y=566..676) ──
+        // Tightened to fit the text + minimal padding; freed vertical space was
+        // reallocated to the Product ID text zone above so the 2-line product
+        // ID can grow larger.
         val parentTextX = 240f
-        val parentTextY = 490f
+        val parentTextY = 566f
         val parentTextW = 850f
-        val parentTextH = 186f
+        val parentTextH = 110f
         paint.typeface = Typeface.DEFAULT
         val parentMaxFont = parentTextH * 0.85f
         paint.textSize = fitTextToWidth(parentRollId1, parentTextW, parentMaxFont, paint)
