@@ -45,3 +45,7 @@ app.*.map.json
 /android/app/release
 PROJECT_SPEC.md
 LABEL_SPEC.md
+
+# Signing keystores — never commit
+*.jks
+*.keystore
