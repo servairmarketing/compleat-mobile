@@ -235,17 +235,25 @@ class _ProductionScreenState extends State<ProductionScreen>
     }
 
     setState(() => _lpPrinting = true);
-    final detail = await PrinterService.printLabel(
-      productId: _lpSelectedProduct!,
-      productName: _lpSelectedProductName ?? _lpSelectedProduct!,
-      parentRollId1: p1,
-      parentRollId2: _lpTwoParent ? p2 : null,
-      quantity: qty,
-    );
+    // New dual-barcode label: one parent ID per label, same product ID on every
+    // label — loop the print call once per parent so each parent gets its own roll.
+    final parentIds = (_lpTwoParent && p2.isNotEmpty) ? [p1, p2] : [p1];
+    String? errorDetail;
+    for (final pid in parentIds) {
+      final detail = await PrinterService.printLabel(
+        productId: _lpSelectedProduct!,
+        productName: _lpSelectedProductName ?? _lpSelectedProduct!,
+        parentRollId1: pid,
+        parentRollId2: null,
+        quantity: qty,
+      );
+      if (detail.startsWith('ERROR')) { errorDetail = detail; break; }
+    }
     setState(() => _lpPrinting = false);
 
-    if (!detail.startsWith('ERROR')) {
-      _showMessage('$qty label(s) sent to printer!', true);
+    if (errorDetail == null) {
+      final total = qty * parentIds.length;
+      _showMessage('$total label(s) sent to printer!', true);
     } else {
       _showMessage('Printing failed. Make sure Brother iPrint&Label app is installed.', false);
     }
