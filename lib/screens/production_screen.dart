@@ -16,6 +16,7 @@ class ProductionScreen extends StatefulWidget {
 class _ProductionScreenState extends State<ProductionScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  int _lastTabIndex = 0;
 
   // Label Printing tab
   final _lpParent1 = TextEditingController();
@@ -25,6 +26,13 @@ class _ProductionScreenState extends State<ProductionScreen>
   String? _lpSelectedProductName;
   final _lpQtyController = TextEditingController();
   bool _lpPrinting = false;
+  final _lpParent1Focus = FocusNode();
+  final _lpParent2Focus = FocusNode();
+  final _lpProductFocus = FocusNode();
+  final _lpQtyFocus = FocusNode();
+  final _lpPrintFocus = FocusNode();
+  final _lpProductKey = GlobalKey<DropdownSearchState<String>>();
+  final _lpScrollController = ScrollController();
 
   // Roll Production tab
   final _rpParent1 = TextEditingController();
@@ -36,6 +44,11 @@ class _ProductionScreenState extends State<ProductionScreen>
   String _selectedStatus = '';
   final _rpNotesController = TextEditingController();
   bool _submitting = false;
+  final _rpParent1Focus = FocusNode();
+  final _rpParent2Focus = FocusNode();
+  final _rpNotesFocus = FocusNode();
+  final _rpSubmitFocus = FocusNode();
+  final _rpScrollController = ScrollController();
 
   // Parent roll data fetched from API
   Map<String, dynamic>? _lpParentRoll1Data;
@@ -54,16 +67,52 @@ class _ProductionScreenState extends State<ProductionScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_handleTabChange);
     _loadProducts();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _lpParent1Focus.requestFocus();
+    });
+  }
+
+  void _handleTabChange() {
+    if (_tabController.index == _lastTabIndex) return;
+    _lastTabIndex = _tabController.index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_tabController.index == 0) {
+        _lpParent1Focus.requestFocus();
+      } else {
+        _rpParent1Focus.requestFocus();
+      }
+    });
+  }
+
+  void _focusAndOpenLpProduct() {
+    _lpProductFocus.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _lpProductKey.currentState?.openDropDownSearch();
+    });
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     _lpParent1.dispose(); _lpParent2.dispose();
     _rpParent1.dispose(); _rpParent2.dispose();
     _rpScanController.dispose(); _rpScanFocus.dispose();
     _lpQtyController.dispose(); _rpNotesController.dispose();
+    _lpParent1Focus.dispose();
+    _lpParent2Focus.dispose();
+    _lpProductFocus.dispose();
+    _lpQtyFocus.dispose();
+    _lpPrintFocus.dispose();
+    _lpScrollController.dispose();
+    _rpParent1Focus.dispose();
+    _rpParent2Focus.dispose();
+    _rpNotesFocus.dispose();
+    _rpSubmitFocus.dispose();
+    _rpScrollController.dispose();
     super.dispose();
   }
 
@@ -292,6 +341,14 @@ class _ProductionScreenState extends State<ProductionScreen>
     if (errorDetail == null) {
       final total = qty * parentIds.length;
       _showMessage('$total label(s) sent to printer!', true);
+      FocusScope.of(context).unfocus();
+      if (_lpScrollController.hasClients) {
+        _lpScrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _lpParent1Focus.requestFocus();
+      });
     } else {
       _showMessage('Printing failed. Make sure Brother iPrint&Label app is installed.', false);
     }
@@ -427,6 +484,14 @@ class _ProductionScreenState extends State<ProductionScreen>
       _selectedStatus = '';
     });
     setState(() { _rpParentRoll1Data = null; _rpParentRoll2Data = null; });
+    FocusScope.of(context).unfocus();
+    if (_rpScrollController.hasClients) {
+      _rpScrollController.animateTo(0,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _rpParent1Focus.requestFocus();
+    });
   }
 
   int get _totalScanned => _scannedItems.values.fold(0, (s, e) => s + (e['count'] as int));
@@ -486,6 +551,7 @@ class _ProductionScreenState extends State<ProductionScreen>
   // ── Label Printing Tab ─────────────────────────────────────────
   Widget _buildLabelTab() {
     return SingleChildScrollView(
+      controller: _lpScrollController,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -501,7 +567,19 @@ class _ProductionScreenState extends State<ProductionScreen>
             ),
           ),
           const SizedBox(height: 12),
-          _buildTextField('Parent Roll ID 1 *', _lpParent1, autofocus: true, onSubmitted: (_) => _validateLpParent1()),
+          _buildTextField('Parent Roll ID 1 *', _lpParent1,
+              focusNode: _lpParent1Focus,
+              keyboardType: TextInputType.visiblePassword,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) async {
+                await _validateLpParent1();
+                if (!mounted) return;
+                if (_lpTwoParent) {
+                  _lpParent2Focus.requestFocus();
+                } else {
+                  _focusAndOpenLpProduct();
+                }
+              }),
           if (_lpParentRoll1Data != null)
             Container(
               margin: const EdgeInsets.only(top: 4, bottom: 8),
@@ -518,7 +596,15 @@ class _ProductionScreenState extends State<ProductionScreen>
             ),
           if (_lpTwoParent) ...[
             const SizedBox(height: 12),
-            _buildTextField('Parent Roll ID 2 *', _lpParent2, onSubmitted: (_) => _validateLpParent2()),
+            _buildTextField('Parent Roll ID 2 *', _lpParent2,
+                focusNode: _lpParent2Focus,
+                keyboardType: TextInputType.visiblePassword,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) async {
+                  await _validateLpParent2();
+                  if (!mounted) return;
+                  _focusAndOpenLpProduct();
+                }),
             if (_lpParentRoll2Data != null)
               Container(
                 margin: const EdgeInsets.only(top: 4, bottom: 8),
@@ -535,7 +621,10 @@ class _ProductionScreenState extends State<ProductionScreen>
               ),
           ],
           const SizedBox(height: 12),
-          DropdownSearch<String>(
+          Focus(
+            focusNode: _lpProductFocus,
+            child: DropdownSearch<String>(
+            key: _lpProductKey,
             items: _lpFilteredProducts.map((p) => '${p['product_id']} — ${p['product_name']}').toList(),
             selectedItem: _lpSelectedProduct != null && _lpFilteredProducts.any((p) => p['product_id'] == _lpSelectedProduct)
                 ? '$_lpSelectedProduct — ${_lpFilteredProducts.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
@@ -603,24 +692,37 @@ class _ProductionScreenState extends State<ProductionScreen>
                   }
                 }
               }
+              if (mounted && _lpSelectedProduct != null) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _lpQtyFocus.requestFocus();
+                });
+              }
             },
           ),
+          ),
           const SizedBox(height: 12),
-          _buildTextField('Number of Labels *', _lpQtyController, numeric: true),
+          _buildTextField('Number of Labels *', _lpQtyController,
+              focusNode: _lpQtyFocus,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _lpPrintFocus.requestFocus()),
           const SizedBox(height: 20),
           Row(children: [
             Expanded(
-              child: SizedBox(
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: _lpPrinting ? null : _printLabels,
-                  icon: _lpPrinting
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.print, size: 24),
-                  label: Text(_lpPrinting ? 'Printing...' : 'Print Labels',
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+              child: Focus(
+                focusNode: _lpPrintFocus,
+                child: SizedBox(
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    onPressed: _lpPrinting ? null : _printLabels,
+                    icon: _lpPrinting
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.print, size: 24),
+                    label: Text(_lpPrinting ? 'Printing...' : 'Print Labels',
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                  ),
                 ),
               ),
             ),
@@ -653,6 +755,7 @@ class _ProductionScreenState extends State<ProductionScreen>
   // ── Roll Production Tab ────────────────────────────────────────
   Widget _buildProductionTab() {
     return SingleChildScrollView(
+      controller: _rpScrollController,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -668,7 +771,19 @@ class _ProductionScreenState extends State<ProductionScreen>
             ),
           ),
           const SizedBox(height: 12),
-          _buildTextField('Parent Roll ID 1 *', _rpParent1, onSubmitted: (_) => _validateRpParent1()),
+          _buildTextField('Parent Roll ID 1 *', _rpParent1,
+              focusNode: _rpParent1Focus,
+              keyboardType: TextInputType.visiblePassword,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) async {
+                await _validateRpParent1();
+                if (!mounted) return;
+                if (_rpTwoParent) {
+                  _rpParent2Focus.requestFocus();
+                } else {
+                  _rpScanFocus.requestFocus();
+                }
+              }),
           if (_rpParentRoll1Data != null)
             Container(
               margin: const EdgeInsets.only(top: 4, bottom: 8),
@@ -685,7 +800,15 @@ class _ProductionScreenState extends State<ProductionScreen>
             ),
           if (_rpTwoParent) ...[
             const SizedBox(height: 12),
-            _buildTextField('Parent Roll ID 2 *', _rpParent2, onSubmitted: (_) => _validateRpParent2()),
+            _buildTextField('Parent Roll ID 2 *', _rpParent2,
+                focusNode: _rpParent2Focus,
+                keyboardType: TextInputType.visiblePassword,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) async {
+                  await _validateRpParent2();
+                  if (!mounted) return;
+                  _rpScanFocus.requestFocus();
+                }),
             if (_rpParentRoll2Data != null)
               Container(
                 margin: const EdgeInsets.only(top: 4, bottom: 8),
@@ -733,6 +856,8 @@ class _ProductionScreenState extends State<ProductionScreen>
             controller: _rpScanController,
             focusNode: _rpScanFocus,
             autofocus: false,
+            keyboardType: TextInputType.visiblePassword,
+            textInputAction: TextInputAction.done,
             style: const TextStyle(fontSize: 18),
             decoration: const InputDecoration(
               labelText: 'Scan Product Barcode',
@@ -785,20 +910,24 @@ class _ProductionScreenState extends State<ProductionScreen>
             _statusButton('finished', '🔴 Finished', Colors.red[700]!),
           ]),
           const SizedBox(height: 12),
-          _buildTextField('Notes (optional)', _rpNotesController),
+          _buildTextField('Notes (optional)', _rpNotesController,
+              focusNode: _rpNotesFocus, multiline: true),
           const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: ElevatedButton.icon(
-              onPressed: _submitting ? null : _submitProduction,
-              icon: _submitting
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.check_circle, size: 24),
-              label: Text(_submitting ? 'Submitting...' : 'Submit Production',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+          Focus(
+            focusNode: _rpSubmitFocus,
+            child: SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton.icon(
+                onPressed: _submitting ? null : _submitProduction,
+                icon: _submitting
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.check_circle, size: 24),
+                label: Text(_submitting ? 'Submitting...' : 'Submit Production',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+              ),
             ),
           ),
           const SizedBox(height: 10),
@@ -838,11 +967,21 @@ class _ProductionScreenState extends State<ProductionScreen>
   }
 
   Widget _buildTextField(String label, TextEditingController controller,
-      {bool numeric = false, bool autofocus = false, Function(String)? onSubmitted}) {
+      {bool numeric = false, bool autofocus = false, Function(String)? onSubmitted,
+       FocusNode? focusNode, TextInputType? keyboardType,
+       TextInputAction? textInputAction, bool multiline = false}) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       autofocus: autofocus,
-      keyboardType: numeric ? TextInputType.number : TextInputType.text,
+      keyboardType: multiline
+          ? TextInputType.multiline
+          : (keyboardType ?? (numeric ? TextInputType.number : TextInputType.text)),
+      textInputAction: multiline
+          ? TextInputAction.newline
+          : textInputAction,
+      maxLines: multiline ? 3 : 1,
+      minLines: multiline ? 1 : null,
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,

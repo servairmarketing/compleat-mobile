@@ -12,6 +12,9 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _usernameFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
+  final _signInFocusNode = FocusNode();
   bool _loading = false;
   String? _error;
   String _version = '';
@@ -20,6 +23,19 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _loadVersion();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _usernameFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _usernameFocusNode.dispose();
+    _passwordFocusNode.dispose();
+    _signInFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadVersion() async {
@@ -72,6 +88,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: [
                         TextField(
                           controller: _usernameController,
+                          focusNode: _usernameFocusNode,
+                          keyboardType: TextInputType.text,
+                          textInputAction: TextInputAction.next,
                           style: const TextStyle(fontSize: 18),
                           decoration: const InputDecoration(
                             labelText: 'Username',
@@ -79,11 +98,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
                           ),
+                          onSubmitted: (_) => _passwordFocusNode.requestFocus(),
                         ),
                         const SizedBox(height: 16),
                         TextField(
                           controller: _passwordController,
+                          focusNode: _passwordFocusNode,
                           obscureText: true,
+                          keyboardType: TextInputType.visiblePassword,
+                          textInputAction: TextInputAction.done,
                           style: const TextStyle(fontSize: 18),
                           decoration: const InputDecoration(
                             labelText: 'Password',
@@ -91,25 +114,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
                           ),
-                          onSubmitted: (_) => _login(),
+                          onSubmitted: (_) {
+                            _signInFocusNode.requestFocus();
+                            _login();
+                          },
                         ),
                         if (_error != null) ...[
                           const SizedBox(height: 12),
                           Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 16)),
                         ],
                         const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity, height: 56,
-                          child: ElevatedButton(
-                            onPressed: _loading ? null : _login,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1a73e8),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        Focus(
+                          focusNode: _signInFocusNode,
+                          child: SizedBox(
+                            width: double.infinity, height: 56,
+                            child: ElevatedButton(
+                              onPressed: _loading ? null : _login,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1a73e8),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: _loading
+                                  ? const CircularProgressIndicator(color: Colors.white)
+                                  : const Text('Sign In', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                             ),
-                            child: _loading
-                                ? const CircularProgressIndicator(color: Colors.white)
-                                : const Text('Sign In', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],

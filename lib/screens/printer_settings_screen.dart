@@ -14,6 +14,8 @@ class PrinterSettingsScreen extends StatefulWidget {
 
 class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   final _ipController = TextEditingController();
+  final _ipFocusNode = FocusNode();
+  final _saveFocusNode = FocusNode();
   PrinterStatus _status = PrinterStatus.checking;
   bool _printing = false;
   Timer? _pollTimer;
@@ -24,6 +26,9 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     super.initState();
     _loadIp();
     _loadVersion();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ipFocusNode.requestFocus();
+    });
   }
 
   Future<void> _loadVersion() async {
@@ -99,6 +104,8 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   void dispose() {
     _pollTimer?.cancel();
     _ipController.dispose();
+    _ipFocusNode.dispose();
+    _saveFocusNode.dispose();
     super.dispose();
   }
 
@@ -188,7 +195,9 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
             const SizedBox(height: 24),
             TextField(
               controller: _ipController,
-              keyboardType: TextInputType.number,
+              focusNode: _ipFocusNode,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
               style: const TextStyle(fontSize: 18),
               decoration: const InputDecoration(
                 labelText: 'Printer IP Address',
@@ -197,18 +206,25 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                 prefixIcon: Icon(Icons.print, size: 28),
                 contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
               ),
+              onSubmitted: (_) {
+                _saveFocusNode.requestFocus();
+                _saveIp();
+              },
             ),
             const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
-                  child: SizedBox(height: 56,
-                    child: ElevatedButton.icon(
-                      onPressed: _saveIp,
-                      icon: const Icon(Icons.save, size: 24),
-                      label: const Text('Save', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                  child: Focus(
+                    focusNode: _saveFocusNode,
+                    child: SizedBox(height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed: _saveIp,
+                        icon: const Icon(Icons.save, size: 24),
+                        label: const Text('Save', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                      ),
                     ),
                   ),
                 ),

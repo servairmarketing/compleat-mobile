@@ -17,7 +17,24 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   final _lengthController = TextEditingController();
   final _weightController = TextEditingController();
   final _notesController = TextEditingController();
+
   final _rollIdFocusNode = FocusNode();
+  final _vendorFocusNode = FocusNode();
+  final _poFocusNode = FocusNode();
+  final _materialTypeFocusNode = FocusNode();
+  final _basisWeightFocusNode = FocusNode();
+  final _widthFocusNode = FocusNode();
+  final _lengthFocusNode = FocusNode();
+  final _weightFocusNode = FocusNode();
+  final _notesFocusNode = FocusNode();
+  final _submitFocusNode = FocusNode();
+
+  final _vendorDropdownKey = GlobalKey<DropdownSearchState<String>>();
+  final _materialTypeDropdownKey = GlobalKey<DropdownSearchState<String>>();
+  final _basisWeightDropdownKey = GlobalKey<DropdownSearchState<String>>();
+  final _widthDropdownKey = GlobalKey<DropdownSearchState<String>>();
+
+  final _scrollController = ScrollController();
 
   List<Map> _vendors = [];
   List<String> _materialTypes = [];
@@ -36,12 +53,37 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   void initState() {
     super.initState();
     _loadMasters();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _rollIdFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
+    _rollIdController.dispose();
+    _poController.dispose();
+    _lengthController.dispose();
+    _weightController.dispose();
+    _notesController.dispose();
     _rollIdFocusNode.dispose();
+    _vendorFocusNode.dispose();
+    _poFocusNode.dispose();
+    _materialTypeFocusNode.dispose();
+    _basisWeightFocusNode.dispose();
+    _widthFocusNode.dispose();
+    _lengthFocusNode.dispose();
+    _weightFocusNode.dispose();
+    _notesFocusNode.dispose();
+    _submitFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _focusAndOpenDropdown(FocusNode node, GlobalKey<DropdownSearchState<String>> key) {
+    node.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) key.currentState?.openDropDownSearch();
+    });
   }
 
   Future<void> _loadMasters() async {
@@ -152,6 +194,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedBasisWeight = null;
     });
     FocusScope.of(context).unfocus();
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(0,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocusNode.requestFocus();
     });
@@ -173,6 +219,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             behavior: HitTestBehavior.translucent,
             onTap: () => FocusScope.of(context).unfocus(),
             child: SingleChildScrollView(
+            controller: _scrollController,
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -193,19 +240,29 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   ),
 
                 _buildField('Roll ID', _rollIdController,
-                    hint: 'Auto-generated if empty', focusNode: _rollIdFocusNode),
+                    hint: 'Auto-generated if empty',
+                    focusNode: _rollIdFocusNode,
+                    keyboardType: TextInputType.visiblePassword,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey)),
                 const SizedBox(height: 14),
 
                 _buildVendorDropdown(),
                 const SizedBox(height: 14),
 
-                _buildField('PO Number', _poController),
+                _buildField('PO Number', _poController,
+                    focusNode: _poFocusNode,
+                    keyboardType: TextInputType.visiblePassword,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _focusAndOpenDropdown(_materialTypeFocusNode, _materialTypeDropdownKey)),
                 const SizedBox(height: 14),
 
                 _buildSimpleDropdown(
                   label: 'Material Type *',
                   items: _materialTypes,
                   value: _selectedMaterialType,
+                  focusNode: _materialTypeFocusNode,
+                  dropdownKey: _materialTypeDropdownKey,
                   enabled: _selectedBasisWeight != 'Crepe' || _selectedMaterialType == 'Crepe',
                   onChanged: (v) {
                     setState(() {
@@ -216,6 +273,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedBasisWeight = null;
                       }
                     });
+                    _focusAndOpenDropdown(_basisWeightFocusNode, _basisWeightDropdownKey);
                   },
                 ),
                 const SizedBox(height: 14),
@@ -224,6 +282,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   label: 'Basis Weight *',
                   items: _basisWeights,
                   value: _selectedBasisWeight,
+                  focusNode: _basisWeightFocusNode,
+                  dropdownKey: _basisWeightDropdownKey,
                   enabled: _selectedMaterialType != 'Crepe' || _selectedBasisWeight == 'Crepe',
                   onChanged: (v) {
                     setState(() {
@@ -234,6 +294,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedMaterialType = null;
                       }
                     });
+                    _focusAndOpenDropdown(_widthFocusNode, _widthDropdownKey);
                   },
                 ),
                 const SizedBox(height: 14),
@@ -244,36 +305,58 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       label: 'Width (in) *',
                       items: _widths,
                       value: _selectedWidth,
-                      onChanged: (v) => setState(() => _selectedWidth = v),
+                      focusNode: _widthFocusNode,
+                      dropdownKey: _widthDropdownKey,
+                      onChanged: (v) {
+                        setState(() => _selectedWidth = v);
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _lengthFocusNode.requestFocus();
+                        });
+                      },
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: _buildField('Length (ft) *', _lengthController, numeric: true)),
+                  Expanded(
+                    child: _buildField('Length (ft) *', _lengthController,
+                        focusNode: _lengthFocusNode,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        textInputAction: TextInputAction.next,
+                        onSubmitted: (_) => _weightFocusNode.requestFocus()),
+                  ),
                 ]),
                 const SizedBox(height: 14),
 
                 _buildField('Weight (lbs) *', _weightController,
-                    numeric: true, hint: 'Overall weight of the roll'),
+                    focusNode: _weightFocusNode,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.done,
+                    hint: 'Overall weight of the roll',
+                    onSubmitted: (_) => _submitFocusNode.requestFocus()),
                 const SizedBox(height: 14),
 
-                _buildField('Notes', _notesController, multiline: true),
+                _buildField('Notes', _notesController,
+                    focusNode: _notesFocusNode,
+                    multiline: true),
                 const SizedBox(height: 24),
 
                 Row(children: [
                   Expanded(
-                    child: SizedBox(
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed: _submitting ? null : _submit,
-                        icon: _submitting
-                          ? const SizedBox(width: 20, height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.download_rounded, size: 24),
-                        label: Text(_submitting ? 'Saving...' : 'Receive Roll',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1a73e8),
-                          foregroundColor: Colors.white),
+                    child: Focus(
+                      focusNode: _submitFocusNode,
+                      child: SizedBox(
+                        height: 56,
+                        child: ElevatedButton.icon(
+                          onPressed: _submitting ? null : _submit,
+                          icon: _submitting
+                            ? const SizedBox(width: 20, height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.download_rounded, size: 24),
+                          label: Text(_submitting ? 'Saving...' : 'Receive Roll',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1a73e8),
+                            foregroundColor: Colors.white),
+                        ),
                       ),
                     ),
                   ),
@@ -294,18 +377,23 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Widget _buildField(String label, TextEditingController controller,
-      {bool numeric = false, bool autofocus = false, String? hint,
-       FocusNode? focusNode, bool multiline = false}) {
+      {bool autofocus = false, String? hint,
+       FocusNode? focusNode, bool multiline = false,
+       TextInputType? keyboardType, TextInputAction? textInputAction,
+       Function(String)? onSubmitted}) {
     return TextField(
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
       keyboardType: multiline
           ? TextInputType.multiline
-          : (numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text),
-      textInputAction: multiline ? TextInputAction.newline : null,
+          : (keyboardType ?? TextInputType.text),
+      textInputAction: multiline
+          ? TextInputAction.newline
+          : textInputAction,
       maxLines: multiline ? 3 : 1,
       minLines: multiline ? 1 : null,
+      onSubmitted: onSubmitted,
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,
@@ -323,41 +411,48 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             ? '${_selectedVendor} — ${_vendors.firstWhere((v) => v['vendor_id']?.toString() == _selectedVendor)['vendor_name']}'
             : null
         : null;
-    return DropdownSearch<String>(
-      items: itemList,
-      selectedItem: selectedItem,
-      dropdownDecoratorProps: const DropDownDecoratorProps(
-        dropdownSearchDecoration: InputDecoration(
-          labelText: 'Vendor *',
-          border: OutlineInputBorder(),
-          contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-        ),
-      ),
-      popupProps: PopupProps.menu(
-        showSearchBox: true,
-        searchFieldProps: const TextFieldProps(
-          decoration: InputDecoration(
-            hintText: 'Search vendors...',
+    return Focus(
+      focusNode: _vendorFocusNode,
+      child: DropdownSearch<String>(
+        key: _vendorDropdownKey,
+        items: itemList,
+        selectedItem: selectedItem,
+        dropdownDecoratorProps: const DropDownDecoratorProps(
+          dropdownSearchDecoration: InputDecoration(
+            labelText: 'Vendor *',
             border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 14),
           ),
-          autofocus: true,
         ),
-        constraints: const BoxConstraints(maxHeight: 300),
-        itemBuilder: (context, item, isSelected) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          child: Text(item, style: TextStyle(
-            fontSize: 16,
-            color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          )),
+        popupProps: PopupProps.menu(
+          showSearchBox: true,
+          searchFieldProps: const TextFieldProps(
+            decoration: InputDecoration(
+              hintText: 'Search vendors...',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            ),
+            autofocus: true,
+          ),
+          constraints: const BoxConstraints(maxHeight: 300),
+          itemBuilder: (context, item, isSelected) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            child: Text(item, style: TextStyle(
+              fontSize: 16,
+              color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            )),
+          ),
         ),
+        onChanged: (val) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          if (val == null) { setState(() => _selectedVendor = null); return; }
+          setState(() => _selectedVendor = val.split(' — ')[0]);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _poFocusNode.requestFocus();
+          });
+        },
       ),
-      onChanged: (val) {
-        FocusManager.instance.primaryFocus?.unfocus();
-        if (val == null) { setState(() => _selectedVendor = null); return; }
-        setState(() => _selectedVendor = val.split(' — ')[0]);
-      },
     );
   }
 
@@ -366,35 +461,41 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     required List<String> items,
     required String? value,
     required Function(String?) onChanged,
+    required FocusNode focusNode,
+    required GlobalKey<DropdownSearchState<String>> dropdownKey,
     bool enabled = true,
   }) {
-    return DropdownSearch<String>(
-      enabled: enabled,
-      items: items,
-      selectedItem: value,
-      dropdownDecoratorProps: DropDownDecoratorProps(
-        dropdownSearchDecoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+    return Focus(
+      focusNode: focusNode,
+      child: DropdownSearch<String>(
+        key: dropdownKey,
+        enabled: enabled,
+        items: items,
+        selectedItem: value,
+        dropdownDecoratorProps: DropDownDecoratorProps(
+          dropdownSearchDecoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+          ),
         ),
-      ),
-      popupProps: PopupProps.menu(
-        showSearchBox: items.length > 5,
-        constraints: const BoxConstraints(maxHeight: 250),
-        itemBuilder: (context, item, isSelected) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          child: Text(item, style: TextStyle(
-            fontSize: 16,
-            color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          )),
+        popupProps: PopupProps.menu(
+          showSearchBox: items.length > 5,
+          constraints: const BoxConstraints(maxHeight: 250),
+          itemBuilder: (context, item, isSelected) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            child: Text(item, style: TextStyle(
+              fontSize: 16,
+              color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            )),
+          ),
         ),
+        onChanged: (v) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          onChanged(v);
+        },
       ),
-      onChanged: (v) {
-        FocusManager.instance.primaryFocus?.unfocus();
-        onChanged(v);
-      },
     );
   }
 }
