@@ -88,6 +88,44 @@ class _ProductionScreenState extends State<ProductionScreen>
     });
   }
 
+  List<Map> get _lpFilteredProducts {
+    if (_lpParentRoll1Data == null) return [];
+    final parentMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
+    final parentBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
+    final parentW = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    return _products.where((p) {
+      final pMt = p['material_type']?.toString() ?? '';
+      final pBw = p['basis_weight']?.toString() ?? '';
+      final pW = double.tryParse(p['width']?.toString() ?? '') ?? 0;
+      if (parentMt.isNotEmpty && pMt != parentMt) return false;
+      if (parentBw.isNotEmpty && pBw != parentBw) return false;
+      if (parentW > 0 && pW > parentW) return false;
+      return true;
+    }).toList();
+  }
+
+  Future<bool> _confirmNarrowerWidth(
+      BuildContext context, double parentW, double prodW, String productId,
+      {bool isScan = false}) async {
+    final body = isScan
+        ? 'Scanned product $productId width is ${prodW}" but parent roll width is ${parentW}". Are you sure you want to add this child roll?'
+        : 'Selected product width is ${prodW}" but parent roll width is ${parentW}". Are you sure you want to create a child roll of smaller width?';
+    final yesLabel = isScan ? 'Yes, add' : 'Yes, continue';
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm narrower child roll'),
+        content: Text(body),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text(yesLabel)),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<Map<String, dynamic>?> _fetchParentRoll(String rollId) async {
     final res = await ApiService.get('/rolls/${rollId}');
     if (res['roll'] != null) return Map<String, dynamic>.from(res['roll']);
@@ -280,7 +318,7 @@ class _ProductionScreenState extends State<ProductionScreen>
   }
 
   // ── Roll Production ────────────────────────────────────────────
-  void _processScan(String value) {
+  Future<void> _processScan(String value) async {
     final productId = value.trim();
     if (productId.isEmpty) return;
 
@@ -313,6 +351,10 @@ class _ProductionScreenState extends State<ProductionScreen>
       if (rW > 0 && pW > 0 && pW > rW) {
         _showMessage('Width mismatch: Scanned product $productId width ${pW}" exceeds parent roll width ${rW}". Scan rejected.', false);
         _rpScanController.clear(); return;
+      }
+      if (rW > 0 && pW > 0 && pW < rW) {
+        final ok = await _confirmNarrowerWidth(context, rW, pW, productId, isScan: true);
+        if (!ok) { _rpScanController.clear(); return; }
       }
     }
     if (product.isEmpty) {
@@ -494,9 +536,9 @@ class _ProductionScreenState extends State<ProductionScreen>
           ],
           const SizedBox(height: 12),
           DropdownSearch<String>(
-            items: _products.map((p) => '${p['product_id']} — ${p['product_name']}').toList(),
-            selectedItem: _lpSelectedProduct != null && _products.any((p) => p['product_id'] == _lpSelectedProduct)
-                ? '$_lpSelectedProduct — ${_products.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
+            items: _lpFilteredProducts.map((p) => '${p['product_id']} — ${p['product_name']}').toList(),
+            selectedItem: _lpSelectedProduct != null && _lpFilteredProducts.any((p) => p['product_id'] == _lpSelectedProduct)
+                ? '$_lpSelectedProduct — ${_lpFilteredProducts.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
                 : null,
             dropdownDecoratorProps: const DropDownDecoratorProps(
               dropdownSearchDecoration: InputDecoration(
@@ -525,7 +567,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                 )),
               ),
             ),
-            onChanged: (val) {
+            onChanged: (val) async {
               if (val == null) return;
               final id = val.split(' — ')[0];
               setState(() {
@@ -552,6 +594,13 @@ class _ProductionScreenState extends State<ProductionScreen>
                 if (rW > 0 && pW > 0 && pW > rW) {
                   _showMessage('Width mismatch: Product width ${pW}" exceeds parent roll width ${rW}". Child roll cannot be wider than the parent roll.', false);
                   setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; }); return;
+                }
+                if (rW > 0 && pW > 0 && pW < rW) {
+                  final ok = await _confirmNarrowerWidth(context, rW, pW, id);
+                  if (!ok) {
+                    setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
+                    return;
+                  }
                 }
               }
             },
