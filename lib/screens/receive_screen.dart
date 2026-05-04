@@ -17,6 +17,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   final _lengthController = TextEditingController();
   final _weightController = TextEditingController();
   final _notesController = TextEditingController();
+  final _rollIdFocusNode = FocusNode();
 
   List<Map> _vendors = [];
   List<String> _materialTypes = [];
@@ -35,6 +36,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   void initState() {
     super.initState();
     _loadMasters();
+  }
+
+  @override
+  void dispose() {
+    _rollIdFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadMasters() async {
@@ -123,6 +130,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       final id = res['roll_id'] ?? _rollIdController.text.trim();
       setState(() { _message = 'Roll $id received successfully!'; _messageSuccess = true; });
       _clearForm();
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _messageSuccess) setState(() => _message = null);
+      });
     } else {
       setState(() { _message = res['detail'] ?? 'Error submitting.'; _messageSuccess = false; });
     }
@@ -141,6 +151,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedMaterialType = null;
       _selectedBasisWeight = null;
     });
+    FocusScope.of(context).unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _rollIdFocusNode.requestFocus();
+    });
   }
 
   @override
@@ -155,7 +169,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       ),
       body: _loading
         ? const Center(child: CircularProgressIndicator())
-        : SingleChildScrollView(
+        : GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -176,7 +193,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   ),
 
                 _buildField('Roll ID', _rollIdController,
-                    hint: 'Auto-generated if empty', autofocus: true),
+                    hint: 'Auto-generated if empty', focusNode: _rollIdFocusNode),
                 const SizedBox(height: 14),
 
                 _buildVendorDropdown(),
@@ -239,7 +256,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     numeric: true, hint: 'Overall weight of the roll'),
                 const SizedBox(height: 14),
 
-                _buildField('Notes', _notesController),
+                _buildField('Notes', _notesController, multiline: true),
                 const SizedBox(height: 24),
 
                 Row(children: [
@@ -272,15 +289,23 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               ],
             ),
           ),
+          ),
     );
   }
 
   Widget _buildField(String label, TextEditingController controller,
-      {bool numeric = false, bool autofocus = false, String? hint}) {
+      {bool numeric = false, bool autofocus = false, String? hint,
+       FocusNode? focusNode, bool multiline = false}) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       autofocus: autofocus,
-      keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+      keyboardType: multiline
+          ? TextInputType.multiline
+          : (numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text),
+      textInputAction: multiline ? TextInputAction.newline : null,
+      maxLines: multiline ? 3 : 1,
+      minLines: multiline ? 1 : null,
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,
@@ -329,6 +354,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         ),
       ),
       onChanged: (val) {
+        FocusManager.instance.primaryFocus?.unfocus();
         if (val == null) { setState(() => _selectedVendor = null); return; }
         setState(() => _selectedVendor = val.split(' — ')[0]);
       },
@@ -365,7 +391,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           )),
         ),
       ),
-      onChanged: onChanged,
+      onChanged: (v) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        onChanged(v);
+      },
     );
   }
 }
