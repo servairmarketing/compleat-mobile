@@ -15,8 +15,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final _searchController = TextEditingController();
   DateTime? _selectedDate;
 
-  // Productions state (unchanged)
+  // Productions state
   List<Map> _productions = [];
+  List<Map> _products = [];
 
   bool _loading = false;
   int _selectedTab = 0;
@@ -39,6 +40,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final rRes = await ApiService.get('/rolls/parents?limit=200');
     final pRes = await ApiService.get('/production/list?limit=50');
+    final mRes = await ApiService.get('/masters/products');
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -49,12 +51,26 @@ class _HistoryScreenState extends State<HistoryScreen> {
       newProductions = List<Map>.from(pRes['batches']);
     }
 
+    List<Map> newProducts = [];
+    if (mRes['records'] != null) {
+      newProducts = List<Map>.from(mRes['records']);
+    }
+
     setState(() {
       _productions = newProductions;
+      _products = newProducts;
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
     });
+  }
+
+  Map<String, dynamic> _productById(String? id) {
+    if (id == null || id.isEmpty) return {};
+    for (final p in _products) {
+      if (p['product_id']?.toString() == id) return Map<String, dynamic>.from(p);
+    }
+    return {};
   }
 
   List<_PoGroup> _computeGroups() {
@@ -306,7 +322,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  // ── Productions tab (unchanged logic) ──────────────────────────────────────
+  // ── Productions tab — Level 1 list ─────────────────────────────────────────
 
   Widget _buildProductionList() {
     if (_productions.isEmpty) {
@@ -314,71 +330,117 @@ class _HistoryScreenState extends State<HistoryScreen> {
           child: Text('No productions found.',
               style: TextStyle(fontSize: 18, color: Colors.grey)));
     }
+
+    final sorted = List<Map>.from(_productions);
+    sorted.sort((a, b) {
+      final ta = a['created_at']?.toString() ?? '';
+      final tb = b['created_at']?.toString() ?? '';
+      return tb.compareTo(ta);
+    });
+
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: _productions.length,
+      itemCount: sorted.length,
       itemBuilder: (context, i) {
-        final p = _productions[i];
+        final p = sorted[i];
         final ts = p['created_at'] != null
             ? DateTime.tryParse(p['created_at'].toString())
             : null;
-        final parentIds = (p['parent_roll_ids'] as List?)?.join(' / ') ??
-            p['parent_roll_id']?.toString() ??
-            '—';
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+        final parents = (p['parent_roll_ids'] as List?)?.join(', ') ?? '—';
+        final productId = p['product_id']?.toString() ?? '—';
+        final qty = p['quantity']?.toString() ?? '—';
+        final status = p['status']?.toString() ?? 'in_stock';
+        final badgeColors = _statusBadgeColors(status);
+
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text('Parent: $parentIds',
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              fontFamily: 'monospace')),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green[100],
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text('PRODUCTION',
-                          style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green[800])),
-                    ),
-                  ],
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _ProductionDetailScreen(
+                  roll: p,
+                  product: _productById(p['product_id']?.toString()),
                 ),
-                const SizedBox(height: 6),
-                if (p['items'] != null)
-                  ...(p['items'] as List).map((item) => Text(
-                      '${item['product_id']} × ${item['quantity']}',
-                      style: const TextStyle(fontSize: 14)))
-                else
-                  Text(
-                      '${p['child_product_id'] ?? '—'} × ${p['quantity'] ?? '—'}',
-                      style: const TextStyle(fontSize: 14)),
-                if (ts != null) ...[
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          productId,
+                          style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace'),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: badgeColors.$1,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: badgeColors.$2),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text('× $qty',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
-                  Text(
-                      '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}',
-                      style:
-                          const TextStyle(fontSize: 13, color: Colors.grey)),
+                  Text('Parent: $parents',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                          fontFamily: 'monospace')),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
                 ],
-              ],
+              ),
             ),
           ),
         );
       },
     );
+  }
+
+  static (Color, Color) _statusBadgeColors(String status) {
+    switch (status) {
+      case 'in_stock':
+        return (Colors.green.shade100, Colors.green.shade800);
+      case 'sold':
+        return (Colors.red.shade100, Colors.red.shade800);
+      case 'converted':
+        return (Colors.blue.shade100, Colors.blue.shade800);
+      default:
+        return (Colors.blue.shade100, Colors.blue.shade800);
+    }
   }
 }
 
@@ -512,6 +574,97 @@ class _RollDetailScreen extends StatelessWidget {
       child: TextFormField(
         initialValue: value ?? '—',
         readOnly: true,
+        style: const TextStyle(fontSize: 16, color: Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Production Detail (Level 2) ─────────────────────────────────────────────
+
+class _ProductionDetailScreen extends StatelessWidget {
+  final Map roll;
+  final Map<String, dynamic> product;
+  const _ProductionDetailScreen({required this.roll, required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final ts = roll['created_at'] != null
+        ? DateTime.tryParse(roll['created_at'].toString())
+        : null;
+    final createdAtStr = ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : roll['created_at']?.toString() ?? '—';
+
+    final parentList = (roll['parent_roll_ids'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final productId = roll['product_id']?.toString() ?? '';
+    final displayRollId = productId.isEmpty
+        ? '—'
+        : '$productId-${parentList.join('-')}';
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          roll['roll_id']?.toString() ?? 'Production Detail',
+          style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace'),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            _readField('Roll ID (system)', roll['roll_id']?.toString()),
+            _readField('Display Roll ID', displayRollId),
+            _readField('Product ID', productId),
+            _readField('Product Name', product['product_name']?.toString()),
+            _readField('Material Type',
+                (roll['material_type'] ?? product['material_type'])?.toString()),
+            _readField('Basis Weight',
+                (roll['basis_weight'] ?? product['basis_weight'])?.toString()),
+            _readField('Width (in)',
+                (roll['width'] ?? product['width'])?.toString()),
+            _readField('Length (ft)',
+                (roll['length'] ?? product['length'])?.toString()),
+            _readField('Quantity', roll['quantity']?.toString()),
+            _readField(
+                'Parent Roll(s)', parentList.isEmpty ? '—' : parentList.join('\n')),
+            _readField('Status', roll['status']?.toString()),
+            _readField('Notes', roll['notes']?.toString()),
+            _readField('Produced By', roll['created_by']?.toString()),
+            _readField('Date/Time', createdAtStr),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _readField(String label, String? value) {
+    final v = (value == null || value.isEmpty) ? '—' : value;
+    final lines = '\n'.allMatches(v).length + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        initialValue: v,
+        readOnly: true,
+        maxLines: lines > 1 ? lines : 1,
         style: const TextStyle(fontSize: 16, color: Colors.black87),
         decoration: InputDecoration(
           labelText: label,
