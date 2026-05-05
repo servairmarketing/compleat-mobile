@@ -36,28 +36,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Future<void> _loadHistory() async {
     setState(() => _loading = true);
-    final profile = await ApiService.getUserProfile();
-    final username = profile?['username'] ?? profile?['name'] ?? '';
-    final isAdmin = profile?['role'] == 'admin';
 
     final rRes = await ApiService.get('/rolls/parents?limit=200');
     final pRes = await ApiService.get('/production/list?limit=50');
 
     if (rRes['rolls'] != null) {
-      final all = List<Map>.from(rRes['rolls']);
-      _allRolls = isAdmin
-          ? all
-          : all.where((r) => r['received_by']?.toString() == username).toList();
+      _allRolls = List<Map>.from(rRes['rolls']);
     }
 
     List<Map> newProductions = [];
     if (pRes['batches'] != null) {
-      final all = List<Map>.from(pRes['batches']);
-      newProductions = all
-          .where((p) =>
-              p['created_by']?.toString() == username ||
-              p['produced_by']?.toString() == username)
-          .toList();
+      newProductions = List<Map>.from(pRes['batches']);
     }
 
     setState(() {
