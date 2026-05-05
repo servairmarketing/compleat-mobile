@@ -141,16 +141,16 @@ class _ProductionScreenState extends State<ProductionScreen>
     if (_lpParentRoll1Data == null) return [];
     final parentMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
     final parentBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
-    final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0.0;
     final w2 = (_lpTwoParent && _lpParentRoll2Data != null)
-        ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
-        : 0;
-    final parentWs = [w1, w2].where((w) => w > 0).toList();
+        ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0.0)
+        : 0.0;
+    final parentWs = <double>[w1, w2].where((w) => w > 0).toList();
     final minParentW = parentWs.isEmpty ? 0.0 : parentWs.reduce((a, b) => a < b ? a : b);
     return _products.where((p) {
       final pMt = p['material_type']?.toString() ?? '';
       final pBw = p['basis_weight']?.toString() ?? '';
-      final pW = double.tryParse(p['width']?.toString() ?? '') ?? 0;
+      final pW = double.tryParse(p['width']?.toString() ?? '') ?? 0.0;
       if (parentMt.isNotEmpty && pMt != parentMt) return false;
       if (parentBw.isNotEmpty && pBw != parentBw) return false;
       if (minParentW > 0 && pW > minParentW) return false;
@@ -448,14 +448,14 @@ class _ProductionScreenState extends State<ProductionScreen>
 
     final pMt = product['material_type']?.toString() ?? '';
     final pBw = product['basis_weight']?.toString() ?? '';
-    final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0;
+    final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0.0;
     final rMt = _rpParentRoll1Data!['material_type']?.toString() ?? '';
     final rBw = _rpParentRoll1Data!['basis_weight']?.toString() ?? '';
-    final w1 = double.tryParse(_rpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    final w1 = double.tryParse(_rpParentRoll1Data!['width']?.toString() ?? '') ?? 0.0;
     final w2 = (_rpTwoParent && _rpParentRoll2Data != null)
-        ? (double.tryParse(_rpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
-        : 0;
-    final parentWs = [w1, w2].where((w) => w > 0).toList();
+        ? (double.tryParse(_rpParentRoll2Data!['width']?.toString() ?? '') ?? 0.0)
+        : 0.0;
+    final parentWs = <double>[w1, w2].where((w) => w > 0).toList();
 
     if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
       reject('Material type mismatch: Parent roll is $rMt but scanned product $productId is $pMt. Scan rejected.');
@@ -738,14 +738,14 @@ class _ProductionScreenState extends State<ProductionScreen>
                 final product = _products.firstWhere((p) => p['product_id'] == id, orElse: () => {});
                 final pMt = product['material_type']?.toString() ?? '';
                 final pBw = product['basis_weight']?.toString() ?? '';
-                final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0;
+                final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0.0;
                 final rMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
                 final rBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
-                final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+                final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0.0;
                 final w2 = (_lpTwoParent && _lpParentRoll2Data != null)
-                    ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
-                    : 0;
-                final parentWs = [w1, w2].where((w) => w > 0).toList();
+                    ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0.0)
+                    : 0.0;
+                final parentWs = <double>[w1, w2].where((w) => w > 0).toList();
                 if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
                   rejectAndReopen('Material type mismatch: Parent roll is $rMt but selected product is $pMt. Please select a $rMt product.');
                   return;
