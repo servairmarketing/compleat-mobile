@@ -159,11 +159,14 @@ class _ProductionScreenState extends State<ProductionScreen>
   }
 
   Future<bool> _confirmNarrowerWidth(
-      BuildContext context, double parentW, double prodW, String productId,
+      BuildContext context, List<double> parentWs, double prodW, String productId,
       {bool isScan = false}) async {
+    final parentClause = parentWs.length >= 2
+        ? 'parent roll widths are ${parentWs[0]}" and ${parentWs[1]}"'
+        : 'parent roll width is ${parentWs.isNotEmpty ? parentWs[0] : 0}"';
     final body = isScan
-        ? 'Scanned product $productId width is ${prodW}" but parent roll width is ${parentW}". Are you sure you want to add this child roll?'
-        : 'Selected product width is ${prodW}" but parent roll width is ${parentW}". Are you sure you want to create a child roll of smaller width?';
+        ? 'Scanned product $productId width is ${prodW}" but $parentClause. Are you sure you want to add this child roll?'
+        : 'Selected product width is ${prodW}" but $parentClause. Are you sure you want to create a child roll of smaller width?';
     final yesLabel = isScan ? 'Yes, add' : 'Yes, continue';
     final result = await showDialog<bool>(
       context: context,
@@ -473,7 +476,7 @@ class _ProductionScreenState extends State<ProductionScreen>
         return;
       }
       if (pW < maxP) {
-        final ok = await _confirmNarrowerWidth(context, maxP, pW, productId, isScan: true);
+        final ok = await _confirmNarrowerWidth(context, parentWs, pW, productId, isScan: true);
         if (!ok) {
           _rpScanController.clear();
           if (mounted) _rpScanFocus.requestFocus();
@@ -762,7 +765,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                     return;
                   }
                   if (pW < maxP) {
-                    final ok = await _confirmNarrowerWidth(context, maxP, pW, id);
+                    final ok = await _confirmNarrowerWidth(context, parentWs, pW, id);
                     if (!ok) {
                       setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
                       _focusAndOpenLpProduct();
