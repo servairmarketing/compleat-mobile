@@ -141,14 +141,19 @@ class _ProductionScreenState extends State<ProductionScreen>
     if (_lpParentRoll1Data == null) return [];
     final parentMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
     final parentBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
-    final parentW = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    final w2 = (_lpTwoParent && _lpParentRoll2Data != null)
+        ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
+        : 0;
+    final parentWs = [w1, w2].where((w) => w > 0).toList();
+    final minParentW = parentWs.isEmpty ? 0.0 : parentWs.reduce((a, b) => a < b ? a : b);
     return _products.where((p) {
       final pMt = p['material_type']?.toString() ?? '';
       final pBw = p['basis_weight']?.toString() ?? '';
       final pW = double.tryParse(p['width']?.toString() ?? '') ?? 0;
       if (parentMt.isNotEmpty && pMt != parentMt) return false;
       if (parentBw.isNotEmpty && pBw != parentBw) return false;
-      if (parentW > 0 && pW > parentW) return false;
+      if (minParentW > 0 && pW > minParentW) return false;
       return true;
     }).toList();
   }
@@ -182,130 +187,168 @@ class _ProductionScreenState extends State<ProductionScreen>
     return null;
   }
 
-  Future<void> _validateLpParent1() async {
+  Future<bool> _validateLpParent1() async {
     final id = _lpParent1.text.trim();
-    if (id.isEmpty) { setState(() => _lpParentRoll1Data = null); return; }
+    if (id.isEmpty) { setState(() => _lpParentRoll1Data = null); return false; }
     setState(() => _lpValidatingParent = true);
     final data = await _fetchParentRoll(id);
     setState(() => _lpValidatingParent = false);
     if (data == null) {
+      _lpParent1.clear();
       setState(() => _lpParentRoll1Data = null);
-      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false); return;
+      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false);
+      return false;
     }
     final status = data['status']?.toString() ?? '';
     if (status == 'consumed' || status == 'finished') {
+      _lpParent1.clear();
       setState(() => _lpParentRoll1Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false); return;
+      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      return false;
     }
-    setState(() => _lpParentRoll1Data = data);
-    // Clear product selection when parent roll changes
-    setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
+    setState(() {
+      _lpParentRoll1Data = data;
+      // Clear product selection when parent roll changes
+      _lpSelectedProduct = null;
+      _lpSelectedProductName = null;
+    });
+    return true;
   }
 
-  Future<void> _validateLpParent2() async {
+  Future<bool> _validateLpParent2() async {
     final id = _lpParent2.text.trim();
-    if (id.isEmpty) { setState(() => _lpParentRoll2Data = null); return; }
-    if (id == _lpParent1.text.trim()) {
-      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false); return;
-    }
+    if (id.isEmpty) { setState(() => _lpParentRoll2Data = null); return false; }
     if (_lpParentRoll1Data == null) {
-      _showMessage('Please validate Parent Roll ID 1 first.', false); return;
+      _lpParent2.clear();
+      setState(() => _lpParentRoll2Data = null);
+      _showMessage('Please validate Parent Roll ID 1 first.', false);
+      return false;
+    }
+    if (id == _lpParent1.text.trim()) {
+      _lpParent2.clear();
+      setState(() => _lpParentRoll2Data = null);
+      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false);
+      return false;
     }
     setState(() => _lpValidatingParent = true);
     final data = await _fetchParentRoll(id);
     setState(() => _lpValidatingParent = false);
     if (data == null) {
+      _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
-      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false); return;
+      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false);
+      return false;
     }
     final status = data['status']?.toString() ?? '';
     if (status == 'consumed' || status == 'finished') {
+      _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false); return;
+      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      return false;
     }
-    // Cross-validate against Roll 1
+    // Cross-validate against Roll 1 (material + basis weight only — width is independent)
     final mt1 = _lpParentRoll1Data!['material_type']?.toString() ?? '';
     final mt2 = data['material_type']?.toString() ?? '';
     if (mt1.isNotEmpty && mt2.isNotEmpty && mt1 != mt2) {
+      _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
-      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false); return;
+      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false);
+      return false;
     }
     final bw1 = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
     final bw2 = data['basis_weight']?.toString() ?? '';
     if (bw1.isNotEmpty && bw2.isNotEmpty && bw1 != bw2) {
+      _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
-      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false); return;
+      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false);
+      return false;
     }
-    final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
-    final w2 = double.tryParse(data['width']?.toString() ?? '') ?? 0;
-    if (w1 > 0 && w2 > 0 && w2 < w1) {
-      setState(() => _lpParentRoll2Data = null);
-      _showMessage('Width mismatch: Roll 1 is ${w1}" wide but Roll 2 is ${w2}" wide. Parent Roll 2 cannot be narrower than Parent Roll 1.', false); return;
-    }
-    setState(() => _lpParentRoll2Data = data);
+    setState(() {
+      _lpParentRoll2Data = data;
+      // Clear product selection so filter re-applies with new min width
+      _lpSelectedProduct = null;
+      _lpSelectedProductName = null;
+    });
+    return true;
   }
 
-  Future<void> _validateRpParent1() async {
+  Future<bool> _validateRpParent1() async {
     final id = _rpParent1.text.trim();
-    if (id.isEmpty) { setState(() => _rpParentRoll1Data = null); return; }
+    if (id.isEmpty) { setState(() => _rpParentRoll1Data = null); return false; }
     setState(() => _rpValidatingParent = true);
     final data = await _fetchParentRoll(id);
     setState(() => _rpValidatingParent = false);
     if (data == null) {
+      _rpParent1.clear();
       setState(() => _rpParentRoll1Data = null);
-      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false); return;
+      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false);
+      return false;
     }
     final status = data['status']?.toString() ?? '';
     if (status == 'consumed' || status == 'finished') {
+      _rpParent1.clear();
       setState(() => _rpParentRoll1Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false); return;
+      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      return false;
     }
-    setState(() => _rpParentRoll1Data = data);
-    // Clear scanned items when parent roll changes
-    setState(() => _scannedItems = {});
+    setState(() {
+      _rpParentRoll1Data = data;
+      // Clear scanned items when parent roll changes
+      _scannedItems = {};
+    });
+    return true;
   }
 
-  Future<void> _validateRpParent2() async {
+  Future<bool> _validateRpParent2() async {
     final id = _rpParent2.text.trim();
-    if (id.isEmpty) { setState(() => _rpParentRoll2Data = null); return; }
-    if (id == _rpParent1.text.trim()) {
-      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false); return;
-    }
+    if (id.isEmpty) { setState(() => _rpParentRoll2Data = null); return false; }
     if (_rpParentRoll1Data == null) {
-      _showMessage('Please validate Parent Roll ID 1 first.', false); return;
+      _rpParent2.clear();
+      setState(() => _rpParentRoll2Data = null);
+      _showMessage('Please validate Parent Roll ID 1 first.', false);
+      return false;
+    }
+    if (id == _rpParent1.text.trim()) {
+      _rpParent2.clear();
+      setState(() => _rpParentRoll2Data = null);
+      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false);
+      return false;
     }
     setState(() => _rpValidatingParent = true);
     final data = await _fetchParentRoll(id);
     setState(() => _rpValidatingParent = false);
     if (data == null) {
+      _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
-      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false); return;
+      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false);
+      return false;
     }
     final status = data['status']?.toString() ?? '';
     if (status == 'consumed' || status == 'finished') {
+      _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false); return;
+      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      return false;
     }
-    // Cross-validate against Roll 1
+    // Cross-validate against Roll 1 (material + basis weight only — width is independent)
     final mt1 = _rpParentRoll1Data!['material_type']?.toString() ?? '';
     final mt2 = data['material_type']?.toString() ?? '';
     if (mt1.isNotEmpty && mt2.isNotEmpty && mt1 != mt2) {
+      _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
-      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false); return;
+      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false);
+      return false;
     }
     final bw1 = _rpParentRoll1Data!['basis_weight']?.toString() ?? '';
     final bw2 = data['basis_weight']?.toString() ?? '';
     if (bw1.isNotEmpty && bw2.isNotEmpty && bw1 != bw2) {
+      _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
-      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false); return;
-    }
-    final w1 = double.tryParse(_rpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
-    final w2 = double.tryParse(data['width']?.toString() ?? '') ?? 0;
-    if (w1 > 0 && w2 > 0 && w2 < w1) {
-      setState(() => _rpParentRoll2Data = null);
-      _showMessage('Width mismatch: Roll 1 is ${w1}" wide but Roll 2 is ${w2}" wide. Parent Roll 2 cannot be narrower than Parent Roll 1.', false); return;
+      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false);
+      return false;
     }
     setState(() => _rpParentRoll2Data = data);
+    return true;
   }
 
   // ── Label Printing ─────────────────────────────────────────────
@@ -379,9 +422,18 @@ class _ProductionScreenState extends State<ProductionScreen>
     final productId = value.trim();
     if (productId.isEmpty) return;
 
-    if (_rpParentRoll1Data == null) {
-      _showMessage('Please enter and confirm Parent Roll ID 1 before scanning.', false);
+    void reject(String msg) {
       _rpScanController.clear();
+      _showMessage(msg, false);
+      if (mounted) _rpScanFocus.requestFocus();
+    }
+
+    if (_rpParentRoll1Data == null) {
+      reject('Please enter and confirm Parent Roll ID 1 before scanning.');
+      return;
+    }
+    if (_rpTwoParent && _rpParentRoll2Data == null) {
+      reject('Please enter and confirm Parent Roll ID 2 before scanning.');
       return;
     }
 
@@ -389,34 +441,45 @@ class _ProductionScreenState extends State<ProductionScreen>
       (p) => p['product_id']?.toString() == productId,
       orElse: () => {},
     );
-
-    if (_rpParentRoll1Data != null && product.isNotEmpty) {
-      final pMt = product['material_type']?.toString() ?? '';
-      final rMt = _rpParentRoll1Data!['material_type']?.toString() ?? '';
-      final pBw = product['basis_weight']?.toString() ?? '';
-      final rBw = _rpParentRoll1Data!['basis_weight']?.toString() ?? '';
-      final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0;
-      final rW = double.tryParse(_rpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
-      if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
-        _showMessage('Material type mismatch: Parent roll is $rMt but scanned product $productId is $pMt. Scan rejected.', false);
-        _rpScanController.clear(); return;
-      }
-      if (rBw.isNotEmpty && pBw.isNotEmpty && pBw != rBw) {
-        _showMessage('Basis weight mismatch: Parent roll is $rBw lbs but scanned product $productId requires $pBw lbs. Scan rejected.', false);
-        _rpScanController.clear(); return;
-      }
-      if (rW > 0 && pW > 0 && pW > rW) {
-        _showMessage('Width mismatch: Scanned product $productId width ${pW}" exceeds parent roll width ${rW}". Scan rejected.', false);
-        _rpScanController.clear(); return;
-      }
-      if (rW > 0 && pW > 0 && pW < rW) {
-        final ok = await _confirmNarrowerWidth(context, rW, pW, productId, isScan: true);
-        if (!ok) { _rpScanController.clear(); return; }
-      }
-    }
     if (product.isEmpty) {
-      _showMessage('Product $productId not found in product master. Please check the barcode.', false);
-      _rpScanController.clear(); return;
+      reject('Product $productId not found in product master. Please check the barcode.');
+      return;
+    }
+
+    final pMt = product['material_type']?.toString() ?? '';
+    final pBw = product['basis_weight']?.toString() ?? '';
+    final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0;
+    final rMt = _rpParentRoll1Data!['material_type']?.toString() ?? '';
+    final rBw = _rpParentRoll1Data!['basis_weight']?.toString() ?? '';
+    final w1 = double.tryParse(_rpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+    final w2 = (_rpTwoParent && _rpParentRoll2Data != null)
+        ? (double.tryParse(_rpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
+        : 0;
+    final parentWs = [w1, w2].where((w) => w > 0).toList();
+
+    if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
+      reject('Material type mismatch: Parent roll is $rMt but scanned product $productId is $pMt. Scan rejected.');
+      return;
+    }
+    if (rBw.isNotEmpty && pBw.isNotEmpty && pBw != rBw) {
+      reject('Basis weight mismatch: Parent roll is $rBw lbs but scanned product $productId requires $pBw lbs. Scan rejected.');
+      return;
+    }
+    if (parentWs.isNotEmpty && pW > 0) {
+      final minP = parentWs.reduce((a, b) => a < b ? a : b);
+      final maxP = parentWs.reduce((a, b) => a > b ? a : b);
+      if (pW > minP) {
+        reject('Width mismatch: Scanned product $productId width ${pW}" exceeds parent roll width ${minP}". Scan rejected.');
+        return;
+      }
+      if (pW < maxP) {
+        final ok = await _confirmNarrowerWidth(context, maxP, pW, productId, isScan: true);
+        if (!ok) {
+          _rpScanController.clear();
+          if (mounted) _rpScanFocus.requestFocus();
+          return;
+        }
+      }
     }
 
     final productName = product['product_name']?.toString() ?? productId;
@@ -572,8 +635,9 @@ class _ProductionScreenState extends State<ProductionScreen>
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
-                await _validateLpParent1();
+                final ok = await _validateLpParent1();
                 if (!mounted) return;
+                if (!ok) { _lpParent1Focus.requestFocus(); return; }
                 if (_lpTwoParent) {
                   _lpParent2Focus.requestFocus();
                 } else {
@@ -601,8 +665,9 @@ class _ProductionScreenState extends State<ProductionScreen>
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
-                  await _validateLpParent2();
+                  final ok = await _validateLpParent2();
                   if (!mounted) return;
+                  if (!ok) { _lpParent2Focus.requestFocus(); return; }
                   _focusAndOpenLpProduct();
                 }),
             if (_lpParentRoll2Data != null)
@@ -664,31 +729,45 @@ class _ProductionScreenState extends State<ProductionScreen>
                 _lpSelectedProductName = _products.firstWhere(
                   (p) => p['product_id'] == id, orElse: () => {})['product_name']?.toString();
               });
+              void rejectAndReopen(String msg) {
+                _showMessage(msg, false);
+                setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
+                _focusAndOpenLpProduct();
+              }
               if (_lpParentRoll1Data != null) {
                 final product = _products.firstWhere((p) => p['product_id'] == id, orElse: () => {});
                 final pMt = product['material_type']?.toString() ?? '';
-                final rMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
                 final pBw = product['basis_weight']?.toString() ?? '';
-                final rBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
                 final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0;
-                final rW = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+                final rMt = _lpParentRoll1Data!['material_type']?.toString() ?? '';
+                final rBw = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
+                final w1 = double.tryParse(_lpParentRoll1Data!['width']?.toString() ?? '') ?? 0;
+                final w2 = (_lpTwoParent && _lpParentRoll2Data != null)
+                    ? (double.tryParse(_lpParentRoll2Data!['width']?.toString() ?? '') ?? 0)
+                    : 0;
+                final parentWs = [w1, w2].where((w) => w > 0).toList();
                 if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
-                  _showMessage('Material type mismatch: Parent roll is $rMt but selected product is $pMt. Please select a $rMt product.', false);
-                  setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; }); return;
+                  rejectAndReopen('Material type mismatch: Parent roll is $rMt but selected product is $pMt. Please select a $rMt product.');
+                  return;
                 }
                 if (rBw.isNotEmpty && pBw.isNotEmpty && pBw != rBw) {
-                  _showMessage('Basis weight mismatch: Parent roll is $rBw lbs but product requires $pBw lbs. Please select a matching product.', false);
-                  setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; }); return;
+                  rejectAndReopen('Basis weight mismatch: Parent roll is $rBw lbs but product requires $pBw lbs. Please select a matching product.');
+                  return;
                 }
-                if (rW > 0 && pW > 0 && pW > rW) {
-                  _showMessage('Width mismatch: Product width ${pW}" exceeds parent roll width ${rW}". Child roll cannot be wider than the parent roll.', false);
-                  setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; }); return;
-                }
-                if (rW > 0 && pW > 0 && pW < rW) {
-                  final ok = await _confirmNarrowerWidth(context, rW, pW, id);
-                  if (!ok) {
-                    setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
+                if (parentWs.isNotEmpty && pW > 0) {
+                  final minP = parentWs.reduce((a, b) => a < b ? a : b);
+                  final maxP = parentWs.reduce((a, b) => a > b ? a : b);
+                  if (pW > minP) {
+                    rejectAndReopen('Width mismatch: Product width ${pW}" exceeds parent roll width ${minP}". Child roll cannot be wider than any parent roll.');
                     return;
+                  }
+                  if (pW < maxP) {
+                    final ok = await _confirmNarrowerWidth(context, maxP, pW, id);
+                    if (!ok) {
+                      setState(() { _lpSelectedProduct = null; _lpSelectedProductName = null; });
+                      _focusAndOpenLpProduct();
+                      return;
+                    }
                   }
                 }
               }
@@ -776,8 +855,9 @@ class _ProductionScreenState extends State<ProductionScreen>
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
-                await _validateRpParent1();
+                final ok = await _validateRpParent1();
                 if (!mounted) return;
+                if (!ok) { _rpParent1Focus.requestFocus(); return; }
                 if (_rpTwoParent) {
                   _rpParent2Focus.requestFocus();
                 } else {
@@ -805,8 +885,9 @@ class _ProductionScreenState extends State<ProductionScreen>
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
-                  await _validateRpParent2();
+                  final ok = await _validateRpParent2();
                   if (!mounted) return;
+                  if (!ok) { _rpParent2Focus.requestFocus(); return; }
                   _rpScanFocus.requestFocus();
                 }),
             if (_rpParentRoll2Data != null)
