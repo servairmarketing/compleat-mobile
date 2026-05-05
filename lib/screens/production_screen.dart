@@ -368,19 +368,23 @@ class _ProductionScreenState extends State<ProductionScreen>
     }
 
     setState(() => _lpPrinting = true);
-    // New dual-barcode label: one parent ID per label, same product ID on every
-    // label — loop the print call once per parent so each parent gets its own roll.
+    // Composite-barcode label: each label encodes "ProductID-ParentID". In
+    // two-parent mode print N labels for parent 1 then N for parent 2 (2N total)
+    // so each child roll receives both labels.
     final parentIds = (_lpTwoParent && p2.isNotEmpty) ? [p1, p2] : [p1];
     String? errorDetail;
+    outer:
     for (final pid in parentIds) {
-      final detail = await PrinterService.printLabel(
-        productId: _lpSelectedProduct!,
-        productName: _lpSelectedProductName ?? _lpSelectedProduct!,
-        parentRollId1: pid,
-        parentRollId2: null,
-        quantity: qty,
-      );
-      if (detail.startsWith('ERROR')) { errorDetail = detail; break; }
+      for (var i = 0; i < qty; i++) {
+        final detail = await PrinterService.printLabel(
+          productId: _lpSelectedProduct!,
+          productName: _lpSelectedProductName ?? _lpSelectedProduct!,
+          parentRollId1: pid,
+          parentRollId2: null,
+          quantity: 1,
+        );
+        if (detail.startsWith('ERROR')) { errorDetail = detail; break outer; }
+      }
     }
     setState(() => _lpPrinting = false);
 
