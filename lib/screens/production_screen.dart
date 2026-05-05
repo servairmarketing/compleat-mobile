@@ -569,7 +569,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           const SizedBox(height: 12),
           _buildTextField('Parent Roll ID 1 *', _lpParent1,
               focusNode: _lpParent1Focus,
-              keyboardType: TextInputType.visiblePassword,
+              keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
                 await _validateLpParent1();
@@ -598,7 +598,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             const SizedBox(height: 12),
             _buildTextField('Parent Roll ID 2 *', _lpParent2,
                 focusNode: _lpParent2Focus,
-                keyboardType: TextInputType.visiblePassword,
+                keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
                   await _validateLpParent2();
@@ -773,7 +773,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           const SizedBox(height: 12),
           _buildTextField('Parent Roll ID 1 *', _rpParent1,
               focusNode: _rpParent1Focus,
-              keyboardType: TextInputType.visiblePassword,
+              keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
                 await _validateRpParent1();
@@ -802,7 +802,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             const SizedBox(height: 12),
             _buildTextField('Parent Roll ID 2 *', _rpParent2,
                 focusNode: _rpParent2Focus,
-                keyboardType: TextInputType.visiblePassword,
+                keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
                   await _validateRpParent2();
@@ -856,7 +856,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             controller: _rpScanController,
             focusNode: _rpScanFocus,
             autofocus: false,
-            keyboardType: TextInputType.visiblePassword,
+            keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.done,
             style: const TextStyle(fontSize: 18),
             decoration: const InputDecoration(

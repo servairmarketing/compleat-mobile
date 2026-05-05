@@ -242,7 +242,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 _buildField('Roll ID', _rollIdController,
                     hint: 'Auto-generated if empty',
                     focusNode: _rollIdFocusNode,
-                    keyboardType: TextInputType.visiblePassword,
+                    keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     onSubmitted: (_) => _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey)),
                 const SizedBox(height: 14),
@@ -252,7 +252,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
                 _buildField('PO Number', _poController,
                     focusNode: _poFocusNode,
-                    keyboardType: TextInputType.visiblePassword,
+                    keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     onSubmitted: (_) => _focusAndOpenDropdown(_materialTypeFocusNode, _materialTypeDropdownKey)),
                 const SizedBox(height: 14),
