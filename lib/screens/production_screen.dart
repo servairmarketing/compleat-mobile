@@ -50,7 +50,11 @@ class _ProductionScreenState extends State<ProductionScreen>
   // pending label-1 scan so subsequent scans in a different toggle state are
   // blocked (the batch can't mix single-parent and splice rolls in one doc).
   bool? _rpBatchMode;
-  String _selectedStatus = '';
+  // Per-parent status. "In Stock" is no longer selectable on Roll Production
+  // — a parent that's been used in production has been at least partially
+  // consumed, so it can never logically remain in_stock.
+  String _selectedStatus1 = '';
+  String _selectedStatus2 = '';
   final _rpNotesController = TextEditingController();
   bool _submitting = false;
   final _rpParent1Focus = FocusNode();
@@ -607,8 +611,14 @@ class _ProductionScreenState extends State<ProductionScreen>
     _commitScan(parsedProductId, productName);
   }
 
-  void _selectStatus(String status) {
-    setState(() => _selectedStatus = status);
+  void _selectStatus(int parentSlot, String status) {
+    setState(() {
+      if (parentSlot == 1) {
+        _selectedStatus1 = status;
+      } else {
+        _selectedStatus2 = status;
+      }
+    });
   }
 
   Future<void> _submitProduction() async {
@@ -623,12 +633,24 @@ class _ProductionScreenState extends State<ProductionScreen>
     if (batchTwoParent && p2.isEmpty) { _showMessage('Please enter the second Parent Roll ID.', false); return; }
     if (_scannedItems.isEmpty) { _showMessage('Please scan at least one child roll.', false); return; }
     if (_rpFirstScanProduct != null) { _showMessage('Finish the second scan of the pending splice roll before submitting.', false); return; }
-    if (_selectedStatus.isEmpty) { _showMessage('Please select the parent roll status.', false); return; }
+    // A parent used in production has been at least partially consumed — it
+    // can't stay "in_stock". Force operator to pick Production or Finished
+    // for each parent in scope.
+    if (_selectedStatus1.isEmpty) {
+      _showMessage('Please select status for parent roll 1: Production or Finished.', false);
+      return;
+    }
+    if (batchTwoParent && _selectedStatus2.isEmpty) {
+      _showMessage('Please select status for parent roll 2: Production or Finished.', false);
+      return;
+    }
 
     setState(() => _submitting = true);
 
     final parentRollIds = batchTwoParent ? [p1, p2] : [p1];
-    final parentStatuses = parentRollIds.map((_) => _selectedStatus).toList();
+    final parentStatuses = batchTwoParent
+        ? [_selectedStatus1, _selectedStatus2]
+        : [_selectedStatus1];
     final items = _scannedItems.entries.map((e) => {
       'product_id': e.key,
       'quantity': e.value['count'],
@@ -660,7 +682,8 @@ class _ProductionScreenState extends State<ProductionScreen>
     setState(() {
       _rpTwoParent = false;
       _scannedItems = {};
-      _selectedStatus = '';
+      _selectedStatus1 = '';
+      _selectedStatus2 = '';
       _rpFirstScanProduct = null;
       _rpFirstScanParent = null;
       _rpBatchMode = null;
@@ -1170,16 +1193,29 @@ class _ProductionScreenState extends State<ProductionScreen>
             const SizedBox(height: 8),
           ],
 
-          // Parent roll status
-          const Text('Parent Roll Status *', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          // Parent roll status — Production or Finished only. A parent used
+          // in production cannot remain "in_stock", so that option is gone.
+          // Each parent in scope needs its own explicit selection.
+          Text(
+            (_rpBatchMode ?? _rpTwoParent) ? 'Parent Roll 1 Status *' : 'Parent Roll Status *',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           Row(children: [
-            _statusButton('in_stock', '🟢 In Stock', Colors.green[700]!),
+            _statusButton(1, 'production', '🟡 Production', Colors.orange[700]!),
             const SizedBox(width: 8),
-            _statusButton('production', '🟡 Production', Colors.orange[700]!),
-            const SizedBox(width: 8),
-            _statusButton('finished', '🔴 Finished', Colors.red[700]!),
+            _statusButton(1, 'finished', '🔴 Finished', Colors.red[700]!),
           ]),
+          if (_rpBatchMode ?? _rpTwoParent) ...[
+            const SizedBox(height: 12),
+            const Text('Parent Roll 2 Status *', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(children: [
+              _statusButton(2, 'production', '🟡 Production', Colors.orange[700]!),
+              const SizedBox(width: 8),
+              _statusButton(2, 'finished', '🔴 Finished', Colors.red[700]!),
+            ]),
+          ],
           const SizedBox(height: 12),
           _buildTextField('Notes (optional)', _rpNotesController,
               focusNode: _rpNotesFocus, multiline: true),
@@ -1215,11 +1251,12 @@ class _ProductionScreenState extends State<ProductionScreen>
     );
   }
 
-  Widget _statusButton(String status, String label, Color color) {
-    final selected = _selectedStatus == status;
+  Widget _statusButton(int parentSlot, String status, String label, Color color) {
+    final current = parentSlot == 1 ? _selectedStatus1 : _selectedStatus2;
+    final selected = current == status;
     return Expanded(
       child: GestureDetector(
-        onTap: () => _selectStatus(status),
+        onTap: () => _selectStatus(parentSlot, status),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
