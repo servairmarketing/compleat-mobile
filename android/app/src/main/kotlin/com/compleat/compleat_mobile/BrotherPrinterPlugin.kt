@@ -325,7 +325,8 @@ class BrotherPrinterPlugin(
         // 20px bleed reserved on all four sides (zones below already account for it).
         //
         // 3-zone vertical layout (composite barcode encoding "ProductID-ParentID"):
-        //   Zone A — top 40% of usable height: Product ID text (centered, bold)
+        //   Zone A — top 40% of usable height: Product ID text (single line, bold,
+        //            centered, dynamic font with width-cap AND zone-height cap)
         //   Zone B — middle 40%: composite CODE_128 barcode (centered, NOT rotated)
         //   Zone C — bottom 20%: Parent ID text (centered, single line)
         val width  = 1109
@@ -360,45 +361,19 @@ class BrotherPrinterPlugin(
         val parentZoneY = bcZoneY + zoneBcH
         val parentZoneW = usableW
 
-        // ── Zone A: Product ID text (centered, bold) ──
-        // 2 lines when productId contains "-" (split at first dash, "-" stays on
-        // line 1); each line independently fitTextToWidth. Single-line fallback
-        // when no "-" present.
+        // ── Zone A: Product ID text (single line, centered, bold) ──
+        // Dynamic font size: largest size such that text width fits prodZoneW AND
+        // text height does not exceed zoneProdH (zone height is the cap).
+        // Whichever constraint binds first wins — short IDs hit the height-cap,
+        // long IDs hit the width-cap.
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        val dashIdx = productId.indexOf('-')
-        if (dashIdx >= 0) {
-            val line1 = productId.substring(0, dashIdx + 1)
-            val line2 = productId.substring(dashIdx + 1)
-            val lineH = zoneProdH / 2f
-            val lineMaxFont = lineH * 0.85f
-            val topPad = 10f
-            val lineGap = 8f
-
-            paint.textSize = fitTextToWidth(line1, prodZoneW, lineMaxFont, paint)
-            val l1Bounds = android.graphics.Rect()
-            paint.getTextBounds(line1, 0, line1.length, l1Bounds)
-            val l1W = paint.measureText(line1)
-            val l1X = prodZoneX + (prodZoneW - l1W) / 2f
-            val l1Y = prodZoneY + topPad - l1Bounds.top.toFloat()
-            canvas.drawText(line1, l1X, l1Y, paint)
-
-            paint.textSize = fitTextToWidth(line2, prodZoneW, lineMaxFont, paint)
-            val l2Bounds = android.graphics.Rect()
-            paint.getTextBounds(line2, 0, line2.length, l2Bounds)
-            val l2W = paint.measureText(line2)
-            val l2X = prodZoneX + (prodZoneW - l2W) / 2f
-            val l2Y = l1Y + l1Bounds.bottom.toFloat() + lineGap - l2Bounds.top.toFloat()
-            canvas.drawText(line2, l2X, l2Y, paint)
-        } else {
-            val prodMaxFont = zoneProdH * 0.75f
-            paint.textSize = fitTextToWidth(productId, prodZoneW, prodMaxFont, paint)
-            val prodBounds = android.graphics.Rect()
-            paint.getTextBounds(productId, 0, productId.length, prodBounds)
-            val prodW = paint.measureText(productId)
-            val prodX = prodZoneX + (prodZoneW - prodW) / 2f
-            val prodY = prodZoneY + (zoneProdH + prodBounds.height()) / 2f
-            canvas.drawText(productId, prodX, prodY, paint)
-        }
+        paint.textSize = fitTextToBox(productId, prodZoneW, zoneProdH, paint)
+        val prodBounds = android.graphics.Rect()
+        paint.getTextBounds(productId, 0, productId.length, prodBounds)
+        val prodW = paint.measureText(productId)
+        val prodX = prodZoneX + (prodZoneW - prodW) / 2f
+        val prodY = prodZoneY + (zoneProdH + prodBounds.height()) / 2f
+        canvas.drawText(productId, prodX, prodY, paint)
 
         // ── Zone B: Composite CODE_128 barcode (centered, NOT rotated) ──
         // Encodes "ProductID-ParentID" — single barcode that ties this child roll
@@ -446,6 +421,25 @@ class BrotherPrinterPlugin(
             paint.textSize = size
         }
         return size
+    }
+
+    /**
+     * Finds the largest font size where text fits within BOTH maxWidth and maxHeight.
+     * Measures at a reference size, then scales by min(width-ratio, height-ratio) so
+     * whichever constraint binds first wins — short text hits the height-cap, long
+     * text hits the width-cap. Used for Zone A (Product ID).
+     */
+    private fun fitTextToBox(text: String, maxWidth: Float, maxHeight: Float, paint: Paint): Float {
+        if (text.isEmpty()) return 40f
+        val refSize = 200f
+        paint.textSize = refSize
+        val bounds = android.graphics.Rect()
+        paint.getTextBounds(text, 0, text.length, bounds)
+        val measuredW = paint.measureText(text)
+        val measuredH = bounds.height().toFloat()
+        if (measuredW <= 0f || measuredH <= 0f) return refSize
+        val scale = kotlin.math.min(maxWidth / measuredW, maxHeight / measuredH)
+        return refSize * scale
     }
 
     private fun generateBarcode(data: String, targetWidth: Int, targetHeight: Int): Bitmap? {
