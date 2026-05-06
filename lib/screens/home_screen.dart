@@ -6,6 +6,7 @@ import 'login_screen.dart';
 import 'receive_screen.dart';
 import 'production_screen.dart';
 import 'sales_screen.dart';
+import 'conversion_screen.dart';
 import 'history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -182,6 +183,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           description: 'Sell child rolls to customers',
                           color: const Color(0xFF2e7d32),
                           onTap: () => _navigate(const SalesScreen())),
+                    if (isAdmin || role == 'warehouse' || modules.contains('conversion'))
+                      _MenuCard(icon: Icons.swap_horiz, label: 'Conversion',
+                          description: 'Convert child rolls to different products',
+                          color: const Color(0xFFef6c00),
+                          onTap: () => _navigate(const ConversionScreen())),
                     _MenuCard(icon: Icons.history_rounded, label: 'History',
                         description: 'View recent transactions',
                         color: const Color(0xFFf4b400),

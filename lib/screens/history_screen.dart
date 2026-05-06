@@ -22,6 +22,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // Sales state
   List<Map> _sales = [];
 
+  // Conversions state
+  List<Map> _conversions = [];
+
   bool _loading = false;
   int _selectedTab = 0;
 
@@ -45,6 +48,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final pRes = await ApiService.get('/production/list?limit=50');
     final mRes = await ApiService.get('/masters/products');
     final sRes = await ApiService.get('/sales/list?limit=50');
+    final cRes = await ApiService.get('/conversion/list?limit=50');
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -65,10 +69,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
       newSales = List<Map>.from(sRes['sales']);
     }
 
+    List<Map> newConversions = [];
+    if (cRes['conversions'] != null) {
+      newConversions = List<Map>.from(cRes['conversions']);
+    }
+
     setState(() {
       _productions = newProductions;
       _products = newProducts;
       _sales = newSales;
+      _conversions = newConversions;
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
@@ -172,6 +182,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     _tabButton('Receives', 0, Icons.download_rounded),
                     _tabButton('Productions', 1, Icons.precision_manufacturing),
                     _tabButton('Sales', 2, Icons.point_of_sale),
+                    _tabButton('Conversions', 3, Icons.swap_horiz),
                   ],
                 ),
               ),
@@ -182,7 +193,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ? _buildReceivesTab()
                       : _selectedTab == 1
                           ? _buildProductionList()
-                          : _buildSalesList(),
+                          : _selectedTab == 2
+                              ? _buildSalesList()
+                              : _buildConversionsList(),
                 ),
               ),
             ],
@@ -573,6 +586,126 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return (Colors.blue.shade100, Colors.blue.shade800);
     }
   }
+
+  // ── Conversions tab — Level 1 list ─────────────────────────────────────────
+  Widget _buildConversionsList() {
+    if (_conversions.isEmpty) {
+      return const Center(
+          child: Text('No conversions found.',
+              style: TextStyle(fontSize: 18, color: Colors.grey)));
+    }
+
+    final sorted = List<Map>.from(_conversions);
+    sorted.sort((a, b) {
+      final ta = a['converted_at']?.toString() ?? '';
+      final tb = b['converted_at']?.toString() ?? '';
+      return tb.compareTo(ta);
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sorted.length,
+      itemBuilder: (context, i) {
+        final c = sorted[i];
+        final ts = c['converted_at'] != null
+            ? DateTime.tryParse(c['converted_at'].toString())
+            : null;
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+        final newProduct = c['new_product_id']?.toString() ?? '—';
+        final sourceProduct = c['source_product_id']?.toString() ?? '—';
+        final sourceParents = (c['source_parent_roll_ids'] as List?)
+                ?.map((e) => e.toString())
+                .join(' + ') ??
+            '—';
+        final qty = c['quantity']?.toString() ?? '—';
+        final statusAfter = c['source_status_after']?.toString() ?? '';
+        final badgeColors = statusAfter == 'finished'
+            ? (Colors.red.shade100, Colors.red.shade800)
+            : (Colors.orange.shade100, Colors.orange.shade800);
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _ConversionDetailScreen(
+                  conv: c,
+                  newProduct: _productById(newProduct),
+                  sourceProduct: _productById(sourceProduct),
+                ),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          newProduct,
+                          style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace'),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: badgeColors.$1,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'SOURCE ${statusAfter.toUpperCase()}',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: badgeColors.$2),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text('× $qty new roll${qty == "1" ? "" : "s"}',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text('From: $sourceProduct',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                          fontFamily: 'monospace')),
+                  const SizedBox(height: 2),
+                  Text('Parents: $sourceParents',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                          fontFamily: 'monospace')),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ── Data class ──────────────────────────────────────────────────────────────
@@ -923,6 +1056,116 @@ class _SaleDetailScreen extends StatelessWidget {
                 ),
               );
             }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _readField(String label, String? value) {
+    final v = (value == null || value.isEmpty) ? '—' : value;
+    final lines = '\n'.allMatches(v).length + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        initialValue: v,
+        readOnly: true,
+        maxLines: lines > 1 ? lines : 1,
+        style: const TextStyle(fontSize: 16, color: Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Conversion Detail (Level 2) ─────────────────────────────────────────────
+
+class _ConversionDetailScreen extends StatelessWidget {
+  final Map conv;
+  final Map<String, dynamic> newProduct;
+  final Map<String, dynamic> sourceProduct;
+  const _ConversionDetailScreen({
+    required this.conv,
+    required this.newProduct,
+    required this.sourceProduct,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ts = conv['converted_at'] != null
+        ? DateTime.tryParse(conv['converted_at'].toString())
+        : null;
+    final convertedAtStr = ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : conv['converted_at']?.toString() ?? '—';
+
+    final sourceParents = (conv['source_parent_roll_ids'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          conv['new_product_id']?.toString() ?? 'Conversion Detail',
+          style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace'),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('NEW ROLL',
+                style: TextStyle(color: Colors.black54, fontSize: 12,
+                    letterSpacing: 1.2, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _readField('New Roll ID', conv['new_roll_id']?.toString()),
+            _readField('New Product ID', conv['new_product_id']?.toString()),
+            _readField('New Product Name', newProduct['product_name']?.toString()),
+            _readField('Material', newProduct['material_type']?.toString()),
+            _readField('Basis Weight', newProduct['basis_weight']?.toString()),
+            _readField('Width (in)', newProduct['width']?.toString()),
+            _readField('Length', newProduct['length']?.toString()),
+            _readField('Quantity', conv['quantity']?.toString()),
+            const SizedBox(height: 8),
+            const Text('SOURCE ROLL',
+                style: TextStyle(color: Colors.black54, fontSize: 12,
+                    letterSpacing: 1.2, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _readField('Source Roll ID', conv['source_roll_id']?.toString()),
+            _readField('Source Product ID', conv['source_product_id']?.toString()),
+            _readField('Source Product Name', sourceProduct['product_name']?.toString()),
+            _readField('Source Material', sourceProduct['material_type']?.toString()),
+            _readField('Source Basis Weight', sourceProduct['basis_weight']?.toString()),
+            _readField('Source Width (in)', sourceProduct['width']?.toString()),
+            _readField('Source Length', sourceProduct['length']?.toString()),
+            _readField('Source Parent(s)',
+                sourceParents.isEmpty ? '—' : sourceParents.join('\n')),
+            _readField('Source Status After', conv['source_status_after']?.toString()),
+            const SizedBox(height: 8),
+            const Text('METADATA',
+                style: TextStyle(color: Colors.black54, fontSize: 12,
+                    letterSpacing: 1.2, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _readField('Notes', conv['notes']?.toString()),
+            _readField('Converted By', conv['converted_by']?.toString()),
+            _readField('Converted At', convertedAtStr),
+            _readField('Conversion ID', conv['conversion_id']?.toString()),
           ],
         ),
       ),
