@@ -19,6 +19,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<Map> _productions = [];
   List<Map> _products = [];
 
+  // Sales state
+  List<Map> _sales = [];
+
   bool _loading = false;
   int _selectedTab = 0;
 
@@ -41,6 +44,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final rRes = await ApiService.get('/rolls/parents?limit=200');
     final pRes = await ApiService.get('/production/list?limit=50');
     final mRes = await ApiService.get('/masters/products');
+    final sRes = await ApiService.get('/sales/list?limit=50');
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -56,9 +60,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       newProducts = List<Map>.from(mRes['records']);
     }
 
+    List<Map> newSales = [];
+    if (sRes['sales'] != null) {
+      newSales = List<Map>.from(sRes['sales']);
+    }
+
     setState(() {
       _productions = newProductions;
       _products = newProducts;
+      _sales = newSales;
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
@@ -161,6 +171,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   children: [
                     _tabButton('Receives', 0, Icons.download_rounded),
                     _tabButton('Productions', 1, Icons.precision_manufacturing),
+                    _tabButton('Sales', 2, Icons.point_of_sale),
                   ],
                 ),
               ),
@@ -169,7 +180,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   onRefresh: _loadHistory,
                   child: _selectedTab == 0
                       ? _buildReceivesTab()
-                      : _buildProductionList(),
+                      : _selectedTab == 1
+                          ? _buildProductionList()
+                          : _buildSalesList(),
                 ),
               ),
             ],
@@ -430,6 +443,124 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  // ── Sales tab — Level 1 list ───────────────────────────────────────────────
+
+  Widget _buildSalesList() {
+    if (_sales.isEmpty) {
+      return const Center(
+          child: Text('No sales found.',
+              style: TextStyle(fontSize: 18, color: Colors.grey)));
+    }
+
+    final sorted = List<Map>.from(_sales);
+    sorted.sort((a, b) {
+      final ta = a['sold_at']?.toString() ?? '';
+      final tb = b['sold_at']?.toString() ?? '';
+      return tb.compareTo(ta);
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sorted.length,
+      itemBuilder: (context, i) {
+        final s = sorted[i];
+        final ts = s['sold_at'] != null
+            ? DateTime.tryParse(s['sold_at'].toString())
+            : null;
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+        final items = (s['items'] as List?) ?? const [];
+        final itemCount = items.length;
+        int totalQty = 0;
+        for (final it in items) {
+          if (it is Map && it['quantity'] is num) {
+            totalQty += (it['quantity'] as num).toInt();
+          }
+        }
+        final company = s['company']?.toString() ?? '';
+        final companyLabel = company == 'compleat'
+            ? 'Com-Pleat'
+            : company == 'servair'
+                ? 'Servair'
+                : company.toUpperCase();
+        final customerName = s['customer_name']?.toString().isNotEmpty == true
+            ? s['customer_name'].toString()
+            : (s['customer_id']?.toString() ?? '—');
+        final invoice = s['invoice_number']?.toString() ?? '—';
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _SaleDetailScreen(sale: s),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          customerName,
+                          style: const TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'SOLD',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade800),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text('Invoice: $invoice',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                          fontFamily: 'monospace')),
+                  const SizedBox(height: 4),
+                  Text(
+                      '$companyLabel · $itemCount line${itemCount == 1 ? '' : 's'}'
+                      ' · $totalQty roll${totalQty == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                          fontSize: 13, color: Colors.black54)),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   static (Color, Color) _statusBadgeColors(String status) {
     switch (status) {
       case 'in_stock':
@@ -650,6 +781,148 @@ class _ProductionDetailScreen extends StatelessWidget {
             _readField('Notes', roll['notes']?.toString()),
             _readField('Produced By', roll['created_by']?.toString()),
             _readField('Date/Time', createdAtStr),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _readField(String label, String? value) {
+    final v = (value == null || value.isEmpty) ? '—' : value;
+    final lines = '\n'.allMatches(v).length + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        initialValue: v,
+        readOnly: true,
+        maxLines: lines > 1 ? lines : 1,
+        style: const TextStyle(fontSize: 16, color: Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Sale Detail (Level 2) ───────────────────────────────────────────────────
+
+class _SaleDetailScreen extends StatelessWidget {
+  final Map sale;
+  const _SaleDetailScreen({required this.sale});
+
+  @override
+  Widget build(BuildContext context) {
+    final ts = sale['sold_at'] != null
+        ? DateTime.tryParse(sale['sold_at'].toString())
+        : null;
+    final soldAtStr = ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : sale['sold_at']?.toString() ?? '—';
+
+    final company = sale['company']?.toString() ?? '';
+    final companyLabel = company == 'compleat'
+        ? 'Com-Pleat'
+        : company == 'servair'
+            ? 'Servair'
+            : company;
+
+    final items = (sale['items'] as List?) ?? const [];
+    int totalQty = 0;
+    for (final it in items) {
+      if (it is Map && it['quantity'] is num) {
+        totalQty += (it['quantity'] as num).toInt();
+      }
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          sale['invoice_number']?.toString() ?? 'Sale Detail',
+          style: const TextStyle(
+              fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _readField('Company', companyLabel),
+            _readField(
+                'Customer',
+                sale['customer_name']?.toString().isNotEmpty == true
+                    ? sale['customer_name'].toString()
+                    : sale['customer_id']?.toString()),
+            _readField('Customer ID', sale['customer_id']?.toString()),
+            _readField(
+                'Invoice / Order #', sale['invoice_number']?.toString()),
+            _readField('Total Rolls', '$totalQty'),
+            _readField('Sold By', sale['sold_by']?.toString()),
+            _readField('Sold At', soldAtStr),
+            _readField('Notes', sale['notes']?.toString()),
+            const SizedBox(height: 8),
+            const Text('Items',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            if (items.isEmpty)
+              const Text('—',
+                  style: TextStyle(color: Colors.grey, fontSize: 14)),
+            ...items.map((raw) {
+              final it = raw is Map ? raw : const {};
+              final pid = it['product_id']?.toString() ?? '—';
+              final qty = it['quantity']?.toString() ?? '0';
+              final parentList =
+                  ((it['parent_roll_ids'] as List?) ?? const [])
+                      .map((e) => e.toString())
+                      .toList();
+              final parents =
+                  parentList.isEmpty ? '—' : parentList.join(' + ');
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(pid,
+                                style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          Text('×$qty',
+                              style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1a73e8))),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                          'Parent${parentList.length == 1 ? '' : 's'}: $parents',
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              color: Colors.black87)),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ],
         ),
       ),

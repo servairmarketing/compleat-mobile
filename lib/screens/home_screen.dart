@@ -5,6 +5,7 @@ import '../services/update_service.dart';
 import 'login_screen.dart';
 import 'receive_screen.dart';
 import 'production_screen.dart';
+import 'sales_screen.dart';
 import 'history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -176,6 +177,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           description: 'Start a production run',
                           color: const Color(0xFF0f9d58),
                           onTap: () => _navigate(const ProductionScreen())),
+                    if (role == 'sales' || isAdmin || modules.contains('sales'))
+                      _MenuCard(icon: Icons.point_of_sale, label: 'Sales',
+                          description: 'Sell child rolls to customers',
+                          color: const Color(0xFF2e7d32),
+                          onTap: () => _navigate(const SalesScreen())),
                     _MenuCard(icon: Icons.history_rounded, label: 'History',
                         description: 'View recent transactions',
                         color: const Color(0xFFf4b400),
