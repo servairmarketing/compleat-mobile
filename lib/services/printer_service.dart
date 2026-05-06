@@ -56,6 +56,26 @@ class PrinterService {
     }
   }
 
+  static Future<String> printParentOnlyLabel({
+    required String parentId,
+    int quantity = 1,
+    String? printerIp,
+  }) async {
+    try {
+      final ip = printerIp ?? await getPrinterIp();
+      if (ip.isEmpty) return 'ERROR: No printer IP configured';
+      if (parentId.trim().isEmpty) return 'ERROR: Parent ID is required';
+      final result = await _channel.invokeMethod<String>('printParentOnlyLabel', {
+        'parentId': parentId,
+        'quantity': quantity,
+        'printerIp': ip,
+      });
+      return result ?? 'ERROR: No response from printer plugin';
+    } on PlatformException catch (e) {
+      return 'ERROR: ${e.message}';
+    }
+  }
+
   static Future<String> sendBlankTest({required String printerIp}) async {
     try {
       final result = await _channel.invokeMethod<String>('sendBlankTest', {

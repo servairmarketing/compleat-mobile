@@ -59,6 +59,25 @@ class BrotherPrinterPlugin(
                     withContext(Dispatchers.Main) { result.success(detail) }
                 }
             }
+            "printParentOnlyLabel" -> {
+                val parentId  = call.argument<String>("parentId")  ?: ""
+                val quantity  = call.argument<Int>("quantity")     ?: 1
+                val printerIp = call.argument<String>("printerIp") ?: ""
+                if (printerIp.isEmpty()) {
+                    result.error("NO_IP", "Printer IP not configured", null); return
+                }
+                if (parentId.isEmpty()) {
+                    result.error("NO_PARENT_ID", "Parent ID is required", null); return
+                }
+                scope.launch {
+                    val detail = try {
+                        printParentOnlyLabelRawTcp(parentId, quantity, printerIp)
+                    } catch (e: Exception) {
+                        "ERROR: ${e.message ?: "Unknown error"}"
+                    }
+                    withContext(Dispatchers.Main) { result.success(detail) }
+                }
+            }
             "getPrinterStatus" -> {
                 val printerIp = call.argument<String>("printerIp") ?: ""
                 if (printerIp.isEmpty()) { result.success("OFFLINE"); return }
@@ -408,7 +427,144 @@ class BrotherPrinterPlugin(
         return rotated
     }
 
-    /**
+    // -------------------------------------------------------------------------
+     // Parent-Only Label — single barcode + parent text (no composite, no product)
+     // -------------------------------------------------------------------------
+     // Used by Stock Take when operator-entered parent IDs need physical labels.
+     // Layout (pre-rotation 1109 × 696, 20px bleed → usable 1069 × 656):
+     //   Top 50% of usable height: Parent ID text — bold, centered, single line,
+     //     dynamic font via fitTextToBox (width-cap or zone-height-cap, whichever
+     //     binds first wins).
+     //   Bottom 50% of usable height: CODE_128 barcode encoding parentId only,
+     //     centered, NOT rotated (bars vertical, reads same direction as text),
+     //     same generateBarcode helper as composite label.
+     // After drawing, postRotate(90°) → 696 × 1109 → bitmapToRasterRows.
+     // PRINT_WIDTH_PX = 696 unchanged.
+     private suspend fun printParentOnlyLabelRawTcp(
+         parentId: String, quantity: Int, printerIp: String
+     ): String = withContext(Dispatchers.IO) {
+         val log = StringBuilder()
+         val ts = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+             .format(java.util.Date())
+         log.appendLine("=== BrotherPrint (parent-only) debug $ts ===")
+
+         val bitmap = createParentOnlyLabelBitmap(parentId)
+         val rasterJob = buildRasterJob(bitmap, quantity)
+         bitmap.recycle()
+         log.appendLine("jobBytes=${rasterJob.size}")
+         Log.d("BrotherPrint", "Parent-only job built: ${rasterJob.size} bytes")
+
+         var socketConnected = false
+         var dataSent = false
+         var errorMsg: String? = null
+
+         try {
+             val socket = Socket()
+             socket.connect(InetSocketAddress(printerIp, PRINTER_PORT), 5000)
+             socketConnected = true
+             log.appendLine("socketConnected=true  ip=$printerIp:$PRINTER_PORT")
+             socket.soTimeout = 15000
+             try {
+                 val out: OutputStream = socket.getOutputStream()
+                 out.write(rasterJob)
+                 out.flush()
+                 dataSent = true
+                 log.appendLine("dataSent=true")
+                 Thread.sleep(2000)
+                 log.appendLine("drainSleepDone=true")
+             } finally {
+                 socket.close()
+                 log.appendLine("socketClosed=true")
+             }
+         } catch (e: Exception) {
+             errorMsg = e.message ?: "Unknown error"
+             Log.e("BrotherPrint", "Exception: $errorMsg")
+             log.appendLine("error=$errorMsg")
+         }
+
+         val detail = if (errorMsg == null) {
+             "OK: jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+         } else {
+             "ERROR: $errorMsg | jobBytes=${rasterJob.size}, socketConnected=$socketConnected, dataSent=$dataSent"
+         }
+         log.appendLine("result=$detail")
+
+         try {
+             java.io.File("/sdcard/brother_print_parent_only_debug.txt").writeText(log.toString())
+         } catch (e: Exception) {
+             Log.w("BrotherPrint", "Could not write debug file: ${e.message}")
+         }
+
+         detail
+     }
+
+     private fun createParentOnlyLabelBitmap(parentId: String): Bitmap {
+         // Pre-rotation canvas: 1109 × 696 — same dimensions as composite label,
+         // so postRotate(90°) yields 696 × 1109 and bitmapToRasterRows scales 0%.
+         // 20px bleed all sides → usable 1069 × 656.
+         //
+         // 2-zone vertical layout (50/50 split of usable height):
+         //   Zone P — top 50%: Parent ID text (bold, centered, single line,
+         //            dynamic font via fitTextToBox)
+         //   Zone B — bottom 50%: CODE_128 barcode encoding parentId only
+         //            (centered, NOT rotated)
+         val width  = 1109
+         val height = 696
+
+         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+         val canvas = Canvas(bitmap)
+         canvas.drawColor(Color.WHITE)
+
+         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+         paint.color = Color.BLACK
+
+         val bleed   = 20f
+         val usableX = bleed
+         val usableY = bleed
+         val usableW = width  - 2f * bleed
+         val usableH = height - 2f * bleed
+
+         val zoneTextH = usableH * 0.50f
+         val zoneBcH   = usableH * 0.50f
+
+         val textZoneX = usableX
+         val textZoneY = usableY
+         val textZoneW = usableW
+
+         val bcZoneX = usableX
+         val bcZoneY = textZoneY + zoneTextH
+         val bcZoneW = usableW
+
+         // ── Zone P: Parent ID text (bold, centered, single line, dynamic) ──
+         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+         paint.textSize = fitTextToBox(parentId, textZoneW, zoneTextH, paint)
+         val textBounds = android.graphics.Rect()
+         paint.getTextBounds(parentId, 0, parentId.length, textBounds)
+         val textW = paint.measureText(parentId)
+         val textX = textZoneX + (textZoneW - textW) / 2f
+         val textY = textZoneY + (zoneTextH + textBounds.height()) / 2f
+         canvas.drawText(parentId, textX, textY, paint)
+
+         // ── Zone B: CODE_128 barcode encoding parentId only (centered, NOT rotated) ──
+         val bcRaw = generateBarcode(parentId, bcZoneW.toInt(), zoneBcH.toInt())
+         if (bcRaw != null) {
+             val bx = bcZoneX + (bcZoneW - bcRaw.width) / 2f
+             val by = bcZoneY + (zoneBcH - bcRaw.height) / 2f
+             canvas.drawBitmap(bcRaw, bx, by, null)
+             bcRaw.recycle()
+         }
+
+         // ── Final 90° rotation → 696 × 1109, ready for bitmapToRasterRows() ──
+         val matrix = android.graphics.Matrix()
+         matrix.postRotate(90f)
+         val rotated = android.graphics.Bitmap.createBitmap(
+             bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+         )
+         bitmap.recycle()
+         return rotated
+     }
+
+     /**
      * Finds the largest font size where paint.measureText(text) fits within maxWidth.
      * Starts at maxSize and steps down by 2f until it fits.
      * Never goes below 40f.

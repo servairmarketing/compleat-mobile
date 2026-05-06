@@ -7,6 +7,7 @@ import 'receive_screen.dart';
 import 'production_screen.dart';
 import 'sales_screen.dart';
 import 'conversion_screen.dart';
+import 'stocktake_screen.dart';
 import 'history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -188,6 +189,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           description: 'Convert child rolls to different products',
                           color: const Color(0xFFef6c00),
                           onTap: () => _navigate(const ConversionScreen())),
+                    if (isAdmin || role == 'warehouse' || modules.contains('stocktake'))
+                      _MenuCard(icon: Icons.assignment_turned_in,
+                          label: 'Stock Take',
+                          description: 'Add existing inventory or annual stock take',
+                          color: const Color(0xFF00897B),
+                          onTap: () => _navigate(const StocktakeScreen())),
                     _MenuCard(icon: Icons.history_rounded, label: 'History',
                         description: 'View recent transactions',
                         color: const Color(0xFFf4b400),
