@@ -428,6 +428,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton.icon(
+                              key: const Key('submitConversionButton'),
                               onPressed: _submitting ? null : _submitConversion,
                               icon: _submitting
                                   ? const SizedBox(width: 20, height: 20,
@@ -469,6 +470,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
           Card(
             color: _sourceTwoParent ? Colors.orange[50] : Colors.blue[50],
             child: SwitchListTile(
+              key: const Key('sourceTwoParentToggle'),
               title: Text(
                 _sourceTwoParent ? 'Two-parent source (splice)' : 'Single-parent source',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -504,6 +506,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
               hintText = 'Scan here...';
             }
             return TextField(
+              key: const Key('sourceScanField'),
               controller: _sourceScanController,
               focusNode: _sourceScanFocus,
               autofocus: false,
@@ -630,6 +633,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
     final selected = _sourceStatus == status;
     return Expanded(
       child: GestureDetector(
+        key: Key('sourceStatus${status[0].toUpperCase()}${status.substring(1)}'),
         onTap: () => setState(() => _sourceStatus = status),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -684,6 +688,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
         ),
         const SizedBox(height: 12),
         TextField(
+          key: const Key('newRollScanField'),
           controller: _newRollScanController,
           focusNode: _newRollScanFocus,
           autofocus: false,

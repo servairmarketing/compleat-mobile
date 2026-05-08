@@ -340,11 +340,14 @@ class _SalesScreenState extends State<SalesScreen> {
                   const Text('Company *',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Row(children: [
-                    _companyButton('compleat', 'Com-Pleat'),
-                    const SizedBox(width: 8),
-                    _companyButton('servair', 'Servair'),
-                  ]),
+                  Row(
+                    key: const Key('companyPicker'),
+                    children: [
+                      _companyButton('compleat', 'Com-Pleat'),
+                      const SizedBox(width: 8),
+                      _companyButton('servair', 'Servair'),
+                    ],
+                  ),
                   const SizedBox(height: 16),
 
                   // ── Customer ─────────────────────────────
@@ -359,6 +362,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       ]),
                     ),
                   AbsorbPointer(
+                    key: const Key('customerDropdown'),
                     absorbing: _company == null || _loadingCustomers,
                     child: Opacity(
                       opacity: _company == null ? 0.5 : 1.0,
@@ -432,6 +436,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
                   // ── Invoice ──────────────────────────────
                   TextField(
+                    key: const Key('invoiceNumberField'),
                     controller: _invoiceController,
                     focusNode: _invoiceFocus,
                     keyboardType: TextInputType.emailAddress,
@@ -451,6 +456,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   Card(
                     color: Colors.blue[50],
                     child: SwitchListTile(
+                      key: const Key('salesTwoParentToggle'),
                       title: const Text('Two parent rolls',
                           style: TextStyle(
                               fontSize: 16, fontWeight: FontWeight.bold)),
@@ -470,6 +476,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
                   // ── Scan ─────────────────────────────────
                   TextField(
+                    key: const Key('salesScanField'),
                     controller: _scanController,
                     focusNode: _scanFocus,
                     autofocus: false,
@@ -605,6 +612,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton.icon(
+                      key: const Key('submitSaleButton'),
                       onPressed: _submitting ? null : _submit,
                       icon: _submitting
                           ? const SizedBox(

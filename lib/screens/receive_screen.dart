@@ -240,6 +240,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   ),
 
                 _buildField('Roll ID', _rollIdController,
+                    widgetKey: const Key('rollIdField'),
                     hint: 'Auto-generated if empty',
                     focusNode: _rollIdFocusNode,
                     keyboardType: TextInputType.emailAddress,
@@ -251,6 +252,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 const SizedBox(height: 14),
 
                 _buildField('PO Number', _poController,
+                    widgetKey: const Key('poNumberField'),
                     focusNode: _poFocusNode,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
@@ -258,6 +260,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 const SizedBox(height: 14),
 
                 _buildSimpleDropdown(
+                  widgetKey: const Key('materialTypeDropdown'),
                   label: 'Material Type *',
                   items: _materialTypes,
                   value: _selectedMaterialType,
@@ -279,6 +282,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 const SizedBox(height: 14),
 
                 _buildSimpleDropdown(
+                  widgetKey: const Key('basisWeightDropdown'),
                   label: 'Basis Weight *',
                   items: _basisWeights,
                   value: _selectedBasisWeight,
@@ -302,6 +306,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 Row(children: [
                   Expanded(
                     child: _buildSimpleDropdown(
+                      widgetKey: const Key('widthDropdown'),
                       label: 'Width (in) *',
                       items: _widths,
                       value: _selectedWidth,
@@ -318,6 +323,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _buildField('Length (ft) *', _lengthController,
+                        widgetKey: const Key('lengthField'),
                         focusNode: _lengthFocusNode,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         textInputAction: TextInputAction.next,
@@ -327,6 +333,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 const SizedBox(height: 14),
 
                 _buildField('Weight (lbs) *', _weightController,
+                    widgetKey: const Key('weightField'),
                     focusNode: _weightFocusNode,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     textInputAction: TextInputAction.done,
@@ -346,6 +353,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       child: SizedBox(
                         height: 56,
                         child: ElevatedButton.icon(
+                          key: const Key('submitButton'),
                           onPressed: _submitting ? null : _submit,
                           icon: _submitting
                             ? const SizedBox(width: 20, height: 20,
@@ -380,8 +388,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       {bool autofocus = false, String? hint,
        FocusNode? focusNode, bool multiline = false,
        TextInputType? keyboardType, TextInputAction? textInputAction,
-       Function(String)? onSubmitted}) {
+       Function(String)? onSubmitted, Key? widgetKey}) {
     return TextField(
+      key: widgetKey,
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
@@ -412,6 +421,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             : null
         : null;
     return Focus(
+      key: const Key('vendorDropdown'),
       focusNode: _vendorFocusNode,
       child: DropdownSearch<String>(
         key: _vendorDropdownKey,
@@ -464,8 +474,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     required FocusNode focusNode,
     required GlobalKey<DropdownSearchState<String>> dropdownKey,
     bool enabled = true,
+    Key? widgetKey,
   }) {
     return Focus(
+      key: widgetKey,
       focusNode: focusNode,
       child: DropdownSearch<String>(
         key: dropdownKey,

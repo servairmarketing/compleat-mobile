@@ -149,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   const SizedBox(width: 8),
                   IconButton(
+                    key: const Key('logoutButton'),
                     icon: const Icon(Icons.logout, color: Colors.white70, size: 22),
                     onPressed: _logout,
                     tooltip: 'Logout',
@@ -170,36 +171,50 @@ class _HomeScreenState extends State<HomeScreen> {
                             letterSpacing: 1.2, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 14),
                     if (modules.contains('receive') || isAdmin)
-                      _MenuCard(icon: Icons.download_rounded, label: 'Receive',
+                      _MenuCard(
+                          key: const Key('menuCard_receive'),
+                          icon: Icons.download_rounded, label: 'Receive',
                           description: 'Receive incoming parent rolls',
                           color: const Color(0xFF1a73e8),
                           onTap: () => _navigate(const ReceiveScreen())),
                     if (modules.contains('production') || isAdmin)
-                      _MenuCard(icon: Icons.precision_manufacturing, label: 'Production',
+                      _MenuCard(
+                          key: const Key('menuCard_production'),
+                          icon: Icons.precision_manufacturing, label: 'Production',
                           description: 'Start a production run',
                           color: const Color(0xFF0f9d58),
                           onTap: () => _navigate(const ProductionScreen())),
                     if (role == 'sales' || isAdmin || modules.contains('sales'))
-                      _MenuCard(icon: Icons.point_of_sale, label: 'Sales',
+                      _MenuCard(
+                          key: const Key('menuCard_sales'),
+                          icon: Icons.point_of_sale, label: 'Sales',
                           description: 'Sell child rolls to customers',
                           color: const Color(0xFF2e7d32),
                           onTap: () => _navigate(const SalesScreen())),
                     if (isAdmin || role == 'warehouse' || modules.contains('conversion'))
-                      _MenuCard(icon: Icons.swap_horiz, label: 'Conversion',
+                      _MenuCard(
+                          key: const Key('menuCard_conversion'),
+                          icon: Icons.swap_horiz, label: 'Conversion',
                           description: 'Convert child rolls to different products',
                           color: const Color(0xFFef6c00),
                           onTap: () => _navigate(const ConversionScreen())),
                     if (isAdmin || role == 'warehouse' || modules.contains('stocktake'))
-                      _MenuCard(icon: Icons.assignment_turned_in,
+                      _MenuCard(
+                          key: const Key('menuCard_stocktake'),
+                          icon: Icons.assignment_turned_in,
                           label: 'Stock Take',
                           description: 'Add existing inventory or annual stock take',
                           color: const Color(0xFF00897B),
                           onTap: () => _navigate(const StocktakeScreen())),
-                    _MenuCard(icon: Icons.history_rounded, label: 'History',
+                    _MenuCard(
+                        key: const Key('menuCard_history'),
+                        icon: Icons.history_rounded, label: 'History',
                         description: 'View recent transactions',
                         color: const Color(0xFFf4b400),
                         onTap: () => _navigate(const HistoryScreen())),
-                    _MenuCard(icon: Icons.print_rounded, label: 'Printer Settings',
+                    _MenuCard(
+                        key: const Key('menuCard_printerSettings'),
+                        icon: Icons.print_rounded, label: 'Printer Settings',
                         description: 'Configure label printer',
                         color: const Color(0xFFe53935),
                         onTap: () => _navigate(const PrinterSettingsScreen())),
@@ -234,7 +249,7 @@ class _MenuCard extends StatelessWidget {
   final String description;
   final Color color;
   final VoidCallback onTap;
-  const _MenuCard({required this.icon, required this.label,
+  const _MenuCard({super.key, required this.icon, required this.label,
       required this.description, required this.color, required this.onTap});
 
   @override

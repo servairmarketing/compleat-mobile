@@ -181,6 +181,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
           _ModeCard(
+            key: const Key('initialEntryMode'),
             icon: Icons.add_box_rounded,
             color: const Color(0xFF1a73e8),
             label: 'Initial Stock Entry',
@@ -188,6 +189,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             onTap: () => setState(() => _mode = _StMode.initial),
           ),
           _ModeCard(
+            key: const Key('annualStocktakeMode'),
             icon: Icons.fact_check_rounded,
             color: const Color(0xFF00897B),
             label: 'Annual Stock Take',
@@ -195,6 +197,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             onTap: () => setState(() => _mode = _StMode.annual),
           ),
           _ModeCard(
+            key: const Key('printLabelsMode'),
             icon: Icons.print_rounded,
             color: const Color(0xFFef6c00),
             label: 'Print Labels',
@@ -218,6 +221,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
           _ModeCard(
+            key: const Key('parentSubMode'),
             icon: Icons.inventory_2_rounded,
             color: const Color(0xFF1a73e8),
             label: 'Parent Roll',
@@ -225,6 +229,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             onTap: () => setState(() => _sub = _StSub.parent),
           ),
           _ModeCard(
+            key: const Key('childSubMode'),
             icon: Icons.account_tree_rounded,
             color: const Color(0xFF0f9d58),
             label: 'Child Roll',
@@ -243,7 +248,7 @@ class _ModeCard extends StatelessWidget {
   final String description;
   final Color color;
   final VoidCallback onTap;
-  const _ModeCard({required this.icon, required this.label,
+  const _ModeCard({super.key, required this.icon, required this.label,
       required this.description, required this.color, required this.onTap});
 
   @override
@@ -294,8 +299,9 @@ Widget _stField(String label, TextEditingController controller,
     {bool autofocus = false, String? hint,
      FocusNode? focusNode, bool multiline = false,
      TextInputType? keyboardType, TextInputAction? textInputAction,
-     Function(String)? onSubmitted}) {
+     Function(String)? onSubmitted, Key? widgetKey}) {
   return TextField(
+    key: widgetKey,
     controller: controller,
     focusNode: focusNode,
     autofocus: autofocus,
@@ -324,8 +330,10 @@ Widget _stSimpleDropdown({
   required String? value,
   required Function(String?) onChanged,
   bool enabled = true,
+  Key? widgetKey,
 }) {
   return DropdownSearch<String>(
+    key: widgetKey,
     enabled: enabled,
     items: items,
     selectedItem: value,
@@ -483,11 +491,13 @@ class _InitialParentFormState extends State<_InitialParentForm> {
           children: [
             _stMessage(_message, _ok),
             _stField('Roll ID *', _rollIdCtrl, focusNode: _rollIdFocus,
+                widgetKey: const Key('stocktakeRollIdField'),
                 hint: 'Operator-entered, must be unique',
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             const SizedBox(height: 14),
             DropdownSearch<String>(
+              key: const Key('stocktakeVendorDropdown'),
               items: vendorItems,
               selectedItem: selectedVendor,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -509,9 +519,11 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             ),
             const SizedBox(height: 14),
             _stField('PO Number', _poCtrl,
+                widgetKey: const Key('stocktakePoNumberField'),
                 keyboardType: TextInputType.emailAddress),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              widgetKey: const Key('stocktakeMaterialTypeDropdown'),
               label: 'Material Type *',
               items: widget.materialTypes,
               value: _materialType,
@@ -526,6 +538,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             ),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              widgetKey: const Key('stocktakeBasisWeightDropdown'),
               label: 'Basis Weight *',
               items: widget.basisWeights,
               value: _basisWeight,
@@ -542,6 +555,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             Row(children: [
               Expanded(
                 child: _stSimpleDropdown(
+                  widgetKey: const Key('stocktakeWidthDropdown'),
                   label: 'Width (in) *',
                   items: widget.widths,
                   value: _width,
@@ -551,12 +565,14 @@ class _InitialParentFormState extends State<_InitialParentForm> {
               const SizedBox(width: 12),
               Expanded(
                 child: _stField('Length (ft) *', _lengthCtrl,
+                    widgetKey: const Key('stocktakeLengthField'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     textInputAction: TextInputAction.next),
               ),
             ]),
             const SizedBox(height: 14),
             _stField('Weight (lbs) *', _weightCtrl,
+                widgetKey: const Key('stocktakeWeightField'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
@@ -566,6 +582,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
+                key: const Key('stocktakeSubmitButton'),
                 onPressed: _submitting ? null : _submit,
                 icon: _submitting
                     ? const SizedBox(width: 20, height: 20,
@@ -718,22 +735,26 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               const Spacer(),
               Switch(
+                key: const Key('stocktakeTwoParentToggle'),
                 value: _twoParent,
                 onChanged: (v) => setState(() => _twoParent = v),
               ),
             ]),
             const SizedBox(height: 8),
             _stField('Parent Roll ID 1 *', _parent1Ctrl, focusNode: _parent1Focus,
+                widgetKey: const Key('stocktakeParent1Field'),
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             if (_twoParent) ...[
               const SizedBox(height: 14),
               _stField('Parent Roll ID 2 *', _parent2Ctrl,
+                  widgetKey: const Key('stocktakeParent2Field'),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next),
             ],
             const SizedBox(height: 14),
             DropdownSearch<String>(
+              key: const Key('stocktakeProductDropdown'),
               items: productItems,
               selectedItem: (selectedProduct?.isEmpty ?? true) ? null : selectedProduct,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -764,18 +785,21 @@ class _InitialChildFormState extends State<_InitialChildForm> {
             Row(children: [
               Expanded(
                 child: _stField('Quantity *', _qtyCtrl,
+                    widgetKey: const Key('stocktakeQtyField'),
                     keyboardType: TextInputType.number,
                     textInputAction: TextInputAction.next),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _stField('Length (ft) *', _lengthCtrl,
+                    widgetKey: const Key('stocktakeLengthField'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     textInputAction: TextInputAction.next),
               ),
             ]),
             const SizedBox(height: 14),
             _stField('Weight (lbs) *', _weightCtrl,
+                widgetKey: const Key('stocktakeWeightField'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
@@ -785,6 +809,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
+                key: const Key('stocktakeSubmitButton'),
                 onPressed: _submitting ? null : _submit,
                 icon: _submitting
                     ? const SizedBox(width: 20, height: 20,
@@ -939,6 +964,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
               style: TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 8),
           TextField(
+            key: const Key('stocktakeScanField'),
             controller: _scanCtrl,
             focusNode: _scanFocus,
             autofocus: true,
@@ -1066,6 +1092,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
                 child: SizedBox(
                   height: 56,
                   child: ElevatedButton.icon(
+                    key: const Key('stocktakeSubmitButton'),
                     onPressed: _submitting ? null : _submitInline,
                     icon: _submitting
                         ? const SizedBox(width: 20, height: 20,
@@ -1295,6 +1322,7 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const Spacer(),
             Switch(
+              key: const Key('stocktakeTwoParentToggle'),
               value: _twoParent,
               onChanged: (v) => setState(() {
                 _twoParent = v;
@@ -1310,6 +1338,7 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
               style: const TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 8),
           TextField(
+            key: const Key('stocktakeScanField'),
             controller: _scanCtrl,
             focusNode: _scanFocus,
             autofocus: true,
@@ -1375,18 +1404,21 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
             Row(children: [
               Expanded(
                 child: _stField('Quantity *', _qtyCtrl,
+                    widgetKey: const Key('stocktakeQtyField'),
                     keyboardType: TextInputType.number,
                     textInputAction: TextInputAction.next),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _stField('Length (ft) *', _lengthCtrl,
+                    widgetKey: const Key('stocktakeLengthField'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     textInputAction: TextInputAction.next),
               ),
             ]),
             const SizedBox(height: 14),
             _stField('Weight (lbs) *', _weightCtrl,
+                widgetKey: const Key('stocktakeWeightField'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
@@ -1397,6 +1429,7 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
                 child: SizedBox(
                   height: 56,
                   child: ElevatedButton.icon(
+                    key: const Key('stocktakeSubmitButton'),
                     onPressed: _submitting ? null : _submitInline,
                     icon: _submitting
                         ? const SizedBox(width: 20, height: 20,
@@ -1491,10 +1524,12 @@ class _PrintParentFormState extends State<_PrintParentForm> {
           children: [
             _stMessage(_message, _ok),
             _stField('Roll ID *', _rollIdCtrl, focusNode: _rollIdFocus,
+                widgetKey: const Key('stocktakeRollIdField'),
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             const SizedBox(height: 14),
             _stField('Quantity *', _qtyCtrl,
+                widgetKey: const Key('stocktakeQtyField'),
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 24),
@@ -1502,6 +1537,7 @@ class _PrintParentFormState extends State<_PrintParentForm> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
+                key: const Key('stocktakeSubmitButton'),
                 onPressed: _printing ? null : _print,
                 icon: _printing
                     ? const SizedBox(width: 20, height: 20,
@@ -1614,22 +1650,26 @@ class _PrintChildFormState extends State<_PrintChildForm> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               const Spacer(),
               Switch(
+                key: const Key('stocktakeTwoParentToggle'),
                 value: _twoParent,
                 onChanged: (v) => setState(() => _twoParent = v),
               ),
             ]),
             const SizedBox(height: 8),
             _stField('Parent Roll ID 1 *', _parent1Ctrl, focusNode: _parent1Focus,
+                widgetKey: const Key('stocktakeParent1Field'),
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             if (_twoParent) ...[
               const SizedBox(height: 14),
               _stField('Parent Roll ID 2 *', _parent2Ctrl,
+                  widgetKey: const Key('stocktakeParent2Field'),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next),
             ],
             const SizedBox(height: 14),
             DropdownSearch<String>(
+              key: const Key('stocktakeProductDropdown'),
               items: productItems,
               selectedItem: (selectedProduct?.isEmpty ?? true) ? null : selectedProduct,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -1658,6 +1698,7 @@ class _PrintChildFormState extends State<_PrintChildForm> {
             ),
             const SizedBox(height: 14),
             _stField('Quantity *', _qtyCtrl,
+                widgetKey: const Key('stocktakeQtyField'),
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 24),
@@ -1665,6 +1706,7 @@ class _PrintChildFormState extends State<_PrintChildForm> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
+                key: const Key('stocktakeSubmitButton'),
                 onPressed: _printing ? null : _print,
                 icon: _printing
                     ? const SizedBox(width: 20, height: 20,

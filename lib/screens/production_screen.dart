@@ -739,8 +739,8 @@ class _ProductionScreenState extends State<ProductionScreen>
               indicatorColor: const Color(0xFF1a73e8),
               labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               tabs: const [
-                Tab(icon: Icon(Icons.print, size: 22), text: 'Label Printing'),
-                Tab(icon: Icon(Icons.precision_manufacturing, size: 22), text: 'Roll Production'),
+                Tab(key: Key('labelPrintingTab'), icon: Icon(Icons.print, size: 22), text: 'Label Printing'),
+                Tab(key: Key('rollProductionTab'), icon: Icon(Icons.precision_manufacturing, size: 22), text: 'Roll Production'),
               ],
             ),
             Expanded(
@@ -829,6 +829,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           ],
           const SizedBox(height: 12),
           Focus(
+            key: const Key('productDropdown'),
             focusNode: _lpProductFocus,
             child: DropdownSearch<String>(
             key: _lpProductKey,
@@ -923,6 +924,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           ),
           const SizedBox(height: 12),
           _buildTextField('Number of Labels *', _lpQtyController,
+              widgetKey: const Key('numLabelsField'),
               focusNode: _lpQtyFocus,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               textInputAction: TextInputAction.done,
@@ -935,6 +937,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                 child: SizedBox(
                   height: 56,
                   child: ElevatedButton.icon(
+                    key: const Key('printLabelsButton'),
                     onPressed: _lpPrinting ? null : _printLabels,
                     icon: _lpPrinting
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -985,6 +988,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           Card(
             color: _rpTwoParent ? Colors.orange[50] : Colors.blue[50],
             child: SwitchListTile(
+              key: const Key('twoParentToggle'),
               title: Text(
                 _rpTwoParent ? 'Two-parent mode (splice)' : 'Single-parent mode',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -1009,6 +1013,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           ),
           const SizedBox(height: 12),
           _buildTextField('Parent Roll ID 1 *', _rpParent1,
+              widgetKey: const Key('parent1Field'),
               focusNode: _rpParent1Focus,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
@@ -1039,6 +1044,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           if (_rpTwoParent) ...[
             const SizedBox(height: 12),
             _buildTextField('Parent Roll ID 2 *', _rpParent2,
+                widgetKey: const Key('parent2Field'),
                 focusNode: _rpParent2Focus,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
@@ -1146,6 +1152,7 @@ class _ProductionScreenState extends State<ProductionScreen>
               hintText = 'Scan here...';
             }
             return TextField(
+              key: const Key('scanField'),
               controller: _rpScanController,
               focusNode: _rpScanFocus,
               autofocus: false,
@@ -1226,6 +1233,7 @@ class _ProductionScreenState extends State<ProductionScreen>
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
+                key: const Key('submitProductionButton'),
                 onPressed: _submitting ? null : _submitProduction,
                 icon: _submitting
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -1256,6 +1264,7 @@ class _ProductionScreenState extends State<ProductionScreen>
     final selected = current == status;
     return Expanded(
       child: GestureDetector(
+        key: Key('parent${parentSlot}Status${status[0].toUpperCase()}${status.substring(1)}'),
         onTap: () => _selectStatus(parentSlot, status),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1277,8 +1286,10 @@ class _ProductionScreenState extends State<ProductionScreen>
   Widget _buildTextField(String label, TextEditingController controller,
       {bool numeric = false, bool autofocus = false, Function(String)? onSubmitted,
        FocusNode? focusNode, TextInputType? keyboardType,
-       TextInputAction? textInputAction, bool multiline = false}) {
+       TextInputAction? textInputAction, bool multiline = false,
+       Key? widgetKey}) {
     return TextField(
+      key: widgetKey,
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,

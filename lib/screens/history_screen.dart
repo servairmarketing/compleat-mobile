@@ -179,10 +179,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 color: Colors.white,
                 child: Row(
                   children: [
-                    _tabButton('Receives', 0, Icons.download_rounded),
-                    _tabButton('Productions', 1, Icons.precision_manufacturing),
-                    _tabButton('Sales', 2, Icons.point_of_sale),
-                    _tabButton('Conversions', 3, Icons.swap_horiz),
+                    _tabButton('Receives', 0, Icons.download_rounded,
+                        widgetKey: const Key('receivesTab')),
+                    _tabButton('Productions', 1, Icons.precision_manufacturing,
+                        widgetKey: const Key('productionsTab')),
+                    _tabButton('Sales', 2, Icons.point_of_sale,
+                        widgetKey: const Key('salesTab')),
+                    _tabButton('Conversions', 3, Icons.swap_horiz,
+                        widgetKey: const Key('conversionsTab')),
                   ],
                 ),
               ),
@@ -202,10 +206,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
           );
   }
 
-  Widget _tabButton(String label, int index, IconData icon) {
+  Widget _tabButton(String label, int index, IconData icon, {Key? widgetKey}) {
     final selected = _selectedTab == index;
     return Expanded(
       child: GestureDetector(
+        key: widgetKey,
         onTap: () => setState(() => _selectedTab = index),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 14),

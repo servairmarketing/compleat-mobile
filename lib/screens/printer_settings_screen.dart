@@ -194,6 +194,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
             ),
             const SizedBox(height: 24),
             TextField(
+              key: const Key('printerIpField'),
               controller: _ipController,
               focusNode: _ipFocusNode,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -219,6 +220,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                     focusNode: _saveFocusNode,
                     child: SizedBox(height: 56,
                       child: ElevatedButton.icon(
+                        key: const Key('savePrinterIpButton'),
                         onPressed: _saveIp,
                         icon: const Icon(Icons.save, size: 24),
                         label: const Text('Save', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),

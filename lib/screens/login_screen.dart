@@ -87,6 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       children: [
                         TextField(
+                          key: const Key('usernameField'),
                           controller: _usernameController,
                           focusNode: _usernameFocusNode,
                           keyboardType: TextInputType.text,
@@ -102,6 +103,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
                         TextField(
+                          key: const Key('passwordField'),
                           controller: _passwordController,
                           focusNode: _passwordFocusNode,
                           obscureText: true,
@@ -129,6 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: SizedBox(
                             width: double.infinity, height: 56,
                             child: ElevatedButton(
+                              key: const Key('signInButton'),
                               onPressed: _loading ? null : _login,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF1a73e8),
