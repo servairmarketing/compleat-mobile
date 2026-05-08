@@ -25,6 +25,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
+  patrol: ^4.5.0
   flutter_lints: ^2.0.0
 
 flutter:
@@ -33,3 +36,8 @@ flutter:
     - assets/images/logo-compleat.jpg
     - assets/images/logo-servair.jpg
     - assets/images/ComPleat_Logo_Mark.png
+
+patrol:
+  app_name: compleat_mobile
+  android:
+    package_name: com.compleat.compleat_mobile
