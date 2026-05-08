@@ -159,6 +159,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+            if (appEnvironment != 'prod')
+              Container(
+                key: const Key('environmentBanner'),
+                width: double.infinity,
+                color: Colors.amber[800],
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+                child: Text(
+                  '${appEnvironment.toUpperCase()} ENVIRONMENT',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),

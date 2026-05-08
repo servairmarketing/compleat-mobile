@@ -2,7 +2,22 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String API_BASE = 'https://compleat-inventory-api-793462624071.northamerica-northeast2.run.app';
+// API base URL is selected at compile time via --dart-define=API_BASE=<url>.
+// Default = prod, so an unflagged release build (current CI behavior) keeps
+// pointing at prod with no other change. The test workflow passes the test
+// Cloud Run URL via --dart-define.
+const String API_BASE = String.fromEnvironment(
+  'API_BASE',
+  defaultValue:
+      'https://compleat-inventory-api-793462624071.northamerica-northeast2.run.app',
+);
+
+// Environment label used by the UI to render a banner on non-prod builds so
+// testers always know which backend they're hitting. Set via --dart-define=APP_ENV=test.
+const String appEnvironment = String.fromEnvironment(
+  'APP_ENV',
+  defaultValue: 'prod',
+);
 
 class ApiService {
   static Future<String?> getToken() async {
