@@ -49,3 +49,7 @@ LABEL_SPEC.md
 # Signing keystores — never commit
 *.jks
 *.keystore
+
+# Patrol — auto-generated test bundle and scaffold dir
+patrol_test/
+**/test_bundle.dart

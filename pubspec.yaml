@@ -39,5 +39,6 @@ flutter:
 
 patrol:
   app_name: compleat_mobile
+  test_directory: integration_test
   android:
     package_name: com.compleat.compleat_mobile
