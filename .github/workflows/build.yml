@@ -168,11 +168,11 @@ jobs:
       - name: Build Patrol APKs
         run: |
           export PATH="$PATH":"$HOME/.pub-cache/bin"
-          # all_tests.dart aggregates every integration_test/*_test.dart
+          # all_test.dart aggregates every integration_test/*_test.dart
           # main() into one entry point. patrol_cli only accepts one
           # --target, and a single APK pair keeps Tera P60 runs simple.
           patrol build android --flavor qa \
-            --target=integration_test/all_tests.dart \
+            --target=integration_test/all_test.dart \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
       - uses: actions/upload-artifact@v4
