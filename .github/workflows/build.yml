@@ -108,7 +108,7 @@ jobs:
       - run: flutter pub get
       - name: Build signed test APK
         run: |
-          flutter build apk --release --flavor test \
+          flutter build apk --release --flavor qa \
             --dart-define=KEYSTORE_PATH=compleat-release.jks \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
@@ -117,6 +117,10 @@ jobs:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Rename qa APK to user-facing test name
+        run: |
+          mv build/app/outputs/flutter-apk/app-qa-release.apk \
+             build/app/outputs/flutter-apk/app-test-release.apk
       - uses: actions/upload-artifact@v4
         with:
           name: app-test-release.apk
@@ -164,17 +168,17 @@ jobs:
       - name: Build Patrol APKs
         run: |
           export PATH="$PATH":"$HOME/.pub-cache/bin"
-          patrol build android --flavor test \
+          patrol build android --flavor qa \
             --target=integration_test/login_test.dart \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
       - uses: actions/upload-artifact@v4
         with:
           name: app-patrol-debug.apk
-          path: build/app/outputs/apk/test/debug/app-test-debug.apk
+          path: build/app/outputs/apk/qa/debug/app-qa-debug.apk
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: app-patrol-androidTest.apk
-          path: build/app/outputs/apk/androidTest/test/debug/app-test-debug-androidTest.apk
+          path: build/app/outputs/apk/androidTest/qa/debug/app-qa-debug-androidTest.apk
           if-no-files-found: warn

@@ -37,7 +37,10 @@ android {
         create("prod") {
             dimension = "env"
         }
-        create("test") {
+        // Named "qa" because Android Gradle reserves flavor names starting
+        // with "test" (androidTest source set). Installed applicationId is
+        // still com.compleat.compleat_mobile.test via applicationIdSuffix.
+        create("qa") {
             dimension = "env"
             applicationIdSuffix = ".test"
             versionNameSuffix = "-test"
