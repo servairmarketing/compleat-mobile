@@ -226,6 +226,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               children: [
                 if (_message != null)
                   Container(
+                    key: Key(_messageSuccess ? 'messageBannerSuccess' : 'messageBannerError'),
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     margin: const EdgeInsets.only(bottom: 16),
