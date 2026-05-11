@@ -53,7 +53,7 @@ Start-Transcript -Path $logFile -Append | Out-Null
 # Script version. Bump on every Claude Code edit. The self-update step
 # compares this against the same constant in the remote copy and replaces
 # the local file on disk when remote is newer. Use semver-ish "M.m.p".
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 
 # package constants -- match android/app/build.gradle.kts qa flavor
 $APP_PACKAGE  = 'com.compleat.compleat_mobile.test'
@@ -117,8 +117,16 @@ function Invoke-Native ([string]$exe, [string[]]$argList) {
 function Invoke-SelfUpdate ([string]$Repo, [hashtable]$Headers,
                             [string]$LocalVersion, [string]$LocalPath) {
     try {
-        $url = "https://raw.githubusercontent.com/$Repo/main/scripts/laptop_runner/run_tests.ps1"
-        $resp = Invoke-WebRequest -Headers $Headers -Uri $url -UseBasicParsing
+        # Use the GitHub contents API rather than raw.githubusercontent.com.
+        # The raw host's auth handling for private repos with classic PATs is
+        # unreliable (returns the 404 HTML page); the contents API accepts the
+        # same repo-scoped Bearer token and, with Accept=vnd.github.raw,
+        # responds with the raw file bytes directly.
+        $url = "https://api.github.com/repos/$Repo/contents/scripts/laptop_runner/run_tests.ps1?ref=main"
+        $rawHeaders = @{}
+        foreach ($k in $Headers.Keys) { $rawHeaders[$k] = $Headers[$k] }
+        $rawHeaders['Accept'] = 'application/vnd.github.raw'
+        $resp = Invoke-WebRequest -Headers $rawHeaders -Uri $url -UseBasicParsing
         $content = [string]$resp.Content
         if ($content -match '(?i)<html|<!doctype') {
             Write-Warn 'Update check skipped: remote returned HTML (likely 404 or auth -- check PAT scopes).'
@@ -560,12 +568,16 @@ Write-Ok 'Both packages present on device'
 # 10) Run Patrol instrumentation
 # ----------------------------------------------------------------------------
 Write-Step 'Running Patrol tests (this can take ~30-90s)'
-Write-Host "    Cmd: adb shell am instrument -w -e clearPackageData true $TEST_PACKAGE/$RUNNER"
+# No -e clearPackageData true: that flag makes Patrol call `pm clear` between
+# tests, which kills the app and (without Android Test Orchestrator) leaves
+# the JUnit runner talking to a dead PatrolAppService -- every test past the
+# first returns 500. Our tests already start with pumpWidgetAndSettle(...)
+# on a fresh CompleatApp instance, so per-test data wiping is unnecessary.
+Write-Host "    Cmd: adb shell am instrument -w $TEST_PACKAGE/$RUNNER"
 Write-Host ''
 
 $instArgs = @(
     'shell', 'am', 'instrument', '-w',
-    '-e', 'clearPackageData', 'true',
     "$TEST_PACKAGE/$RUNNER"
 )
 $inst    = Invoke-Native 'adb' $instArgs
