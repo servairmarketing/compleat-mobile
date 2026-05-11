@@ -53,7 +53,7 @@ Start-Transcript -Path $logFile -Append | Out-Null
 # Script version. Bump on every Claude Code edit. The self-update step
 # compares this against the same constant in the remote copy and replaces
 # the local file on disk when remote is newer. Use semver-ish "M.m.p".
-$SCRIPT_VERSION = '1.0.1'
+$SCRIPT_VERSION = '1.0.2'
 
 # package constants -- match android/app/build.gradle.kts qa flavor
 $APP_PACKAGE  = 'com.compleat.compleat_mobile.test'
@@ -385,28 +385,44 @@ Open the URL above to see which job failed. Common causes:
 Write-Ok "Build succeeded in $([int]($buildWaited / 60))m $($buildWaited % 60)s"
 
 # ----------------------------------------------------------------------------
-# 5) Fetch artifacts for the just-built run
+# 5) Discover scenario APK pairs in this run's artifacts
 # ----------------------------------------------------------------------------
-Write-Step 'Fetching artifact list for this build'
+# CI uploads two artifacts per scenario:
+#   app-patrol-debug-<scenario>.apk
+#   app-patrol-androidTest-<scenario>.apk
+# We discover pairs dynamically (so adding/removing a scenario in the repo
+# requires no script change), then run them in alphabetical order.
+Write-Step 'Discovering scenario APK pairs'
 $artsUrl = "https://api.github.com/repos/$repo/actions/runs/$runId/artifacts"
 try {
     $artsResp = Invoke-RestMethod -Headers $headers -Uri $artsUrl -Method Get
 } catch {
     Write-Fail "Could not list artifacts for run ${runId}: $($_.Exception.Message)"
 }
-$debugArt = $artsResp.artifacts | Where-Object { $_.name -eq 'app-patrol-debug.apk'       -and -not $_.expired } | Select-Object -First 1
-$testArt  = $artsResp.artifacts | Where-Object { $_.name -eq 'app-patrol-androidTest.apk' -and -not $_.expired } | Select-Object -First 1
-if (-not $debugArt -or -not $testArt) {
-    $names = ($artsResp.artifacts | ForEach-Object { $_.name }) -join ', '
-    Write-Fail @"
-Run #$runNum completed successfully but did not produce both Patrol APK artifacts.
-Found: $names
-Run URL: $runUrl
 
-Check the build-patrol-test-apk job for upload-artifact failures.
-"@
+$pairs = @{}
+foreach ($art in $artsResp.artifacts) {
+    if ($art.expired) { continue }
+    if ($art.name -match '^app-patrol-debug-(.+)\.apk$') {
+        $name = $matches[1]
+        if (-not $pairs.ContainsKey($name)) { $pairs[$name] = @{} }
+        $pairs[$name].Debug = $art
+    }
+    elseif ($art.name -match '^app-patrol-androidTest-(.+)\.apk$') {
+        $name = $matches[1]
+        if (-not $pairs.ContainsKey($name)) { $pairs[$name] = @{} }
+        $pairs[$name].Test = $art
+    }
 }
-# Same shape as the rest of the script already consumes for display.
+$scenarios = @($pairs.Keys | Sort-Object)
+$incomplete = @($scenarios | Where-Object { -not ($pairs[$_].Debug -and $pairs[$_].Test) })
+if ($incomplete.Count -gt 0) {
+    Write-Fail "Run #$runNum is missing one or both APKs for: $($incomplete -join ', ')"
+}
+if ($scenarios.Count -eq 0) {
+    Write-Fail "Run #$runNum produced no app-patrol-* artifacts. Check the build-patrol-test-apk matrix jobs."
+}
+
 $chosenRun = [pscustomobject]@{
     run_number    = $runNum
     head_sha      = $runDetail.head_sha
@@ -416,17 +432,11 @@ $chosenRun = [pscustomobject]@{
 Write-Host "    Run:     $($chosenRun.display_title)"
 Write-Host "    Commit:  $($chosenRun.head_sha.Substring(0,7))"
 Write-Host "    Created: $($chosenRun.created_at)"
-Write-Ok "Both artifacts ready for run #$runNum"
+Write-Ok "Found $($scenarios.Count) scenario(s): $($scenarios -join ', ')"
 
 # ----------------------------------------------------------------------------
-# 6) Download + extract artifacts
+# 6) Helpers + clean prior downloads
 # ----------------------------------------------------------------------------
-Write-Step 'Downloading artifacts'
-
-# Clean previous downloads to avoid stale APK confusion
-Get-ChildItem $downloadDir -Force -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
 function Download-Artifact ($artifact, $destZip) {
     $url    = $artifact.archive_download_url
     $sizeMb = [math]::Round($artifact.size_in_bytes / 1MB, 1)
@@ -443,11 +453,8 @@ function Download-Artifact ($artifact, $destZip) {
     if ($sz -eq 0) {
         Write-Fail "Downloaded $($artifact.name) is empty (0 bytes)."
     }
-
-    # Validate by zip magic bytes (PK\x03\x04), not by size. The androidTest
-    # APK is genuinely tiny (~3.5 KB) -- it only holds the JUnit runner class
-    # plus the Patrol bundle reference; the actual Dart test code lives in
-    # app-patrol-debug.apk. A size-based gate produces false positives here.
+    # Validate by zip magic bytes (PK\x03\x04), not size. The androidTest
+    # APK is genuinely tiny (~3.5 KB).
     $magic = $null
     try {
         $fs = [System.IO.File]::OpenRead($destZip)
@@ -461,11 +468,8 @@ function Download-Artifact ($artifact, $destZip) {
     } catch {
         Write-Fail "Could not read $destZip to verify format: $($_.Exception.Message)"
     }
-
     $isZip = ($magic -and $magic[0] -eq 0x50 -and $magic[1] -eq 0x4B -and $magic[2] -eq 0x03 -and $magic[3] -eq 0x04)
     if (-not $isZip) {
-        # Peek at the head -- when GitHub rejects auth, it returns HTML/JSON
-        # instead of a zip; surfacing that text saves the user a guessing game.
         $preview = ''
         try {
             $bytes = [System.IO.File]::ReadAllBytes($destZip)
@@ -482,28 +486,12 @@ function Download-Artifact ($artifact, $destZip) {
     }
 }
 
-$debugZip = Join-Path $downloadDir 'app-patrol-debug.zip'
-$testZip  = Join-Path $downloadDir 'app-patrol-androidTest.zip'
-Download-Artifact $debugArt $debugZip
-Download-Artifact $testArt  $testZip
-Write-Ok 'Both artifact zips downloaded'
-
-$debugDir = Join-Path $downloadDir 'debug'
-$testDir  = Join-Path $downloadDir 'androidTest'
-Expand-Archive -Path $debugZip -DestinationPath $debugDir -Force
-Expand-Archive -Path $testZip  -DestinationPath $testDir  -Force
-
-$debugApk = Get-ChildItem $debugDir -Filter '*.apk' -Recurse | Select-Object -First 1
-$testApk  = Get-ChildItem $testDir  -Filter '*.apk' -Recurse | Select-Object -First 1
-if (-not $debugApk) { Write-Fail 'No APK found inside app-patrol-debug.zip' }
-if (-not $testApk)  { Write-Fail 'No APK found inside app-patrol-androidTest.zip' }
-$debugMb = [math]::Round($debugApk.Length / 1MB, 1)
-$testMb  = [math]::Round($testApk.Length  / 1MB, 1)
-Write-Ok "Extracted: $($debugApk.Name) ($debugMb MB)"
-Write-Ok "Extracted: $($testApk.Name) ($testMb MB)"
+# Wipe prior downloads so each run starts clean.
+Get-ChildItem $downloadDir -Force -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 # ----------------------------------------------------------------------------
-# 7) Verify a device is connected
+# 7) Verify a device is connected (one-time, before the per-scenario loop)
 # ----------------------------------------------------------------------------
 Write-Step 'Checking adb device'
 $devicesRaw  = (Invoke-Native 'adb' @('devices')).Out
@@ -529,102 +517,127 @@ $serial = ($deviceLines[0] -split '\s+')[0]
 Write-Ok "Device: $serial"
 
 # ----------------------------------------------------------------------------
-# 8) Uninstall old app + test app (ignore failures; package may not be installed)
+# 8) Per-scenario loop: download, install, run, parse
 # ----------------------------------------------------------------------------
-# adb uninstall returns exit 0 even when package is missing -- check stdout.
-Write-Step 'Uninstalling previous app + test app (if present)'
-$u1 = Invoke-Native 'adb' @('uninstall', $APP_PACKAGE)
-if ($u1.Out -match 'Success') { Write-Ok "removed $APP_PACKAGE" } else { Write-Host "    (not installed: $APP_PACKAGE)" }
-$u2 = Invoke-Native 'adb' @('uninstall', $TEST_PACKAGE)
-if ($u2.Out -match 'Success') { Write-Ok "removed $TEST_PACKAGE" } else { Write-Host "    (not installed: $TEST_PACKAGE)" }
+# Each scenario gets its own download subdir, fresh app uninstall+install,
+# and a single am instrument call. Per-scenario failures are recorded but
+# do not abort the loop -- we want one consolidated PASS/FAIL report.
+$results = @()
+$idx     = 0
+foreach ($scenario in $scenarios) {
+    $idx += 1
+    Write-Host ''
+    Write-Host '------------------------------------------------------------' -ForegroundColor Cyan
+    Write-Host ("  Scenario {0}/{1}: {2}" -f $idx, $scenarios.Count, $scenario) -ForegroundColor Cyan
+    Write-Host '------------------------------------------------------------' -ForegroundColor Cyan
 
-# ----------------------------------------------------------------------------
-# 9) Install both APKs (-t allows test packages, -r reinstall, -d allow downgrade)
-# ----------------------------------------------------------------------------
-Write-Step 'Installing app APK'
-$i1 = Invoke-Native 'adb' @('install', '-t', '-r', '-d', $debugApk.FullName)
-Write-Host $i1.Out.Trim()
-if ($i1.Code -ne 0 -or $i1.Out -notmatch 'Success') {
-    Write-Fail "adb install failed for $($debugApk.Name) (exit=$($i1.Code))"
+    $debugArt = $pairs[$scenario].Debug
+    $testArt  = $pairs[$scenario].Test
+
+    $sDir = Join-Path $downloadDir $scenario
+    New-Item -ItemType Directory -Force -Path $sDir | Out-Null
+    $debugZip = Join-Path $sDir 'debug.zip'
+    $testZip  = Join-Path $sDir 'androidTest.zip'
+
+    Write-Step "[$scenario] Downloading APK pair"
+    Download-Artifact $debugArt $debugZip
+    Download-Artifact $testArt  $testZip
+
+    $debugDir = Join-Path $sDir 'debug'
+    $testDir  = Join-Path $sDir 'androidTest'
+    Expand-Archive -Path $debugZip -DestinationPath $debugDir -Force
+    Expand-Archive -Path $testZip  -DestinationPath $testDir  -Force
+    $debugApk = Get-ChildItem $debugDir -Filter '*.apk' -Recurse | Select-Object -First 1
+    $testApk  = Get-ChildItem $testDir  -Filter '*.apk' -Recurse | Select-Object -First 1
+    if (-not $debugApk -or -not $testApk) {
+        Write-Warn "[$scenario] APK missing after extract -- skipping"
+        $results += @{ Scenario = $scenario; Status = 'SKIP'; Reason = 'no APK in zip' }
+        continue
+    }
+    Write-Ok "[$scenario] $($debugApk.Name) ($([math]::Round($debugApk.Length / 1MB, 1)) MB) + $($testApk.Name)"
+
+    Write-Step "[$scenario] Uninstalling previous packages"
+    Invoke-Native 'adb' @('uninstall', $APP_PACKAGE)  | Out-Null
+    Invoke-Native 'adb' @('uninstall', $TEST_PACKAGE) | Out-Null
+
+    Write-Step "[$scenario] Installing app APK"
+    $i1 = Invoke-Native 'adb' @('install', '-t', '-r', '-d', $debugApk.FullName)
+    Write-Host $i1.Out.Trim()
+    if ($i1.Code -ne 0 -or $i1.Out -notmatch 'Success') {
+        Write-Warn "[$scenario] adb install failed for app APK (exit=$($i1.Code))"
+        $results += @{ Scenario = $scenario; Status = 'FAIL'; Reason = 'app install failed' }
+        continue
+    }
+
+    Write-Step "[$scenario] Installing androidTest APK"
+    $i2 = Invoke-Native 'adb' @('install', '-t', '-r', '-d', $testApk.FullName)
+    Write-Host $i2.Out.Trim()
+    if ($i2.Code -ne 0 -or $i2.Out -notmatch 'Success') {
+        Write-Warn "[$scenario] adb install failed for test APK (exit=$($i2.Code))"
+        $results += @{ Scenario = $scenario; Status = 'FAIL'; Reason = 'test install failed' }
+        continue
+    }
+
+    $pkgList = (Invoke-Native 'adb' @('shell', 'pm', 'list', 'packages')).Out
+    if ($pkgList -notmatch [regex]::Escape("package:$APP_PACKAGE") -or
+        $pkgList -notmatch [regex]::Escape("package:$TEST_PACKAGE")) {
+        Write-Warn "[$scenario] One or both packages not visible after install"
+        $results += @{ Scenario = $scenario; Status = 'FAIL'; Reason = 'package not visible' }
+        continue
+    }
+
+    Write-Step "[$scenario] Running Patrol instrumentation"
+    $instArgs = @('shell', 'am', 'instrument', '-w', "$TEST_PACKAGE/$RUNNER")
+    $inst    = Invoke-Native 'adb' $instArgs
+    $instOut = $inst.Out
+    Write-Host $instOut
+
+    $passed  = $false
+    $crashed = $false
+    $reason  = ''
+    if ($instOut -match 'Process crashed' -or $instOut -match 'INSTRUMENTATION_FAILED') {
+        $crashed = $true
+        $reason  = 'Instrumentation crashed before tests reported.'
+    }
+    elseif ($instOut -match 'OK \((\d+) tests?\)') {
+        $passed = $true
+        $reason = "All $($matches[1]) test(s) passed."
+    }
+    elseif ($instOut -match 'FAILURES!!![\s\S]*?Tests run:\s*(\d+),\s*Failures:\s*(\d+)') {
+        $reason = "Tests run: $($matches[1]), Failures: $($matches[2])"
+    }
+    else {
+        $reason = 'Could not parse instrumentation output.'
+    }
+
+    if ($passed) {
+        Write-Ok "[$scenario] PASS -- $reason"
+        $results += @{ Scenario = $scenario; Status = 'PASS'; Reason = $reason }
+    } else {
+        $statusLabel = if ($crashed) { 'CRASH' } else { 'FAIL' }
+        Write-Warn "[$scenario] $statusLabel -- $reason"
+        $results += @{ Scenario = $scenario; Status = $statusLabel; Reason = $reason }
+    }
 }
-Write-Ok "Installed $($debugApk.Name)"
-
-Write-Step 'Installing androidTest APK'
-$i2 = Invoke-Native 'adb' @('install', '-t', '-r', '-d', $testApk.FullName)
-Write-Host $i2.Out.Trim()
-if ($i2.Code -ne 0 -or $i2.Out -notmatch 'Success') {
-    Write-Fail "adb install failed for $($testApk.Name) (exit=$($i2.Code))"
-}
-Write-Ok "Installed $($testApk.Name)"
-
-# Verify both packages present
-Write-Step 'Verifying install'
-$pkgList = (Invoke-Native 'adb' @('shell', 'pm', 'list', 'packages')).Out
-if ($pkgList -notmatch [regex]::Escape("package:$APP_PACKAGE"))  { Write-Fail "Package $APP_PACKAGE not visible after install." }
-if ($pkgList -notmatch [regex]::Escape("package:$TEST_PACKAGE")) { Write-Fail "Package $TEST_PACKAGE not visible after install." }
-Write-Ok 'Both packages present on device'
 
 # ----------------------------------------------------------------------------
-# 10) Run Patrol instrumentation
+# 9) Summary
 # ----------------------------------------------------------------------------
-Write-Step 'Running Patrol tests (this can take ~30-90s)'
-# No -e clearPackageData true: that flag makes Patrol call `pm clear` between
-# tests, which kills the app and (without Android Test Orchestrator) leaves
-# the JUnit runner talking to a dead PatrolAppService -- every test past the
-# first returns 500. Our tests already start with pumpWidgetAndSettle(...)
-# on a fresh CompleatApp instance, so per-test data wiping is unnecessary.
-Write-Host "    Cmd: adb shell am instrument -w $TEST_PACKAGE/$RUNNER"
-Write-Host ''
-
-$instArgs = @(
-    'shell', 'am', 'instrument', '-w',
-    "$TEST_PACKAGE/$RUNNER"
-)
-$inst    = Invoke-Native 'adb' $instArgs
-$instOut = $inst.Out
-Write-Host $instOut
-
-# ----------------------------------------------------------------------------
-# 11) Parse results
-# ----------------------------------------------------------------------------
-Write-Step 'Result'
-
-$passed  = $false
-$crashed = $false
-$reason  = ''
-
-if ($instOut -match 'Process crashed' -or $instOut -match 'INSTRUMENTATION_FAILED') {
-    $crashed = $true
-    $reason  = 'Instrumentation process crashed before tests could report a result.'
-}
-elseif ($instOut -match 'OK \((\d+) tests?\)') {
-    $passed = $true
-    $count  = $matches[1]
-    $reason = "All $count test(s) passed."
-}
-elseif ($instOut -match 'FAILURES!!![\s\S]*?Tests run:\s*(\d+),\s*Failures:\s*(\d+)') {
-    $reason = "Tests run: $($matches[1]), Failures: $($matches[2])"
-}
-else {
-    $reason = 'Could not parse instrumentation output. Treating as failure.'
-}
+$passCount = @($results | Where-Object { $_.Status -eq 'PASS' }).Count
+$total     = $results.Count
+$allOK     = ($total -gt 0) -and ($passCount -eq $total)
 
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
-if ($passed) {
-    Write-Host '  RESULT: PASS' -ForegroundColor Green
-    Write-Host "  $reason"      -ForegroundColor Green
-} else {
-    Write-Host '  RESULT: FAIL' -ForegroundColor Red
-    Write-Host "  $reason"      -ForegroundColor Red
-    if ($crashed) {
-        Write-Host ''
-        Write-Host '  Likely causes:' -ForegroundColor Yellow
-        Write-Host '    - Test backend unreachable from device'
-        Write-Host "    - Test user 'joseph' / 'Test@1234' missing in test Firestore/Auth"
-        Write-Host '    - APK pair from a different commit than expected'
-    }
+Write-Host '  SCENARIO RESULTS' -ForegroundColor Cyan
+Write-Host '------------------------------------------------------------' -ForegroundColor Cyan
+foreach ($r in $results) {
+    $color = switch ($r.Status) { 'PASS' { 'Green' } 'CRASH' { 'Yellow' } default { 'Red' } }
+    Write-Host ("  {0,-5}  {1,-44}  {2}" -f $r.Status, $r.Scenario, $r.Reason) -ForegroundColor $color
 }
+Write-Host '------------------------------------------------------------' -ForegroundColor Cyan
+$overallColor = if ($allOK) { 'Green' } else { 'Red' }
+Write-Host "  OVERALL: $passCount / $total passed" -ForegroundColor $overallColor
 Write-Host "  Run #$($chosenRun.run_number) | commit $($chosenRun.head_sha.Substring(0,7))"
 Write-Host "  Log: $logFile"
 Write-Host '============================================================' -ForegroundColor Cyan
@@ -633,5 +646,5 @@ Write-Host ''
 Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
 
 Read-Host 'Press Enter to close'
-if (-not $passed) { exit 1 }
+if (-not $allOK) { exit 1 }
 exit 0

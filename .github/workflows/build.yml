@@ -127,13 +127,29 @@ jobs:
           path: build/app/outputs/flutter-apk/app-test-release.apk
 
   build-patrol-test-apk:
-    # Builds Patrol-instrumented debug APK + androidTest APK for E2E runs on
-    # the Tera P60. Manual trigger only — won't run on every push, since
-    # patrol_cli + native instrumentation are heavier than a regular build.
+    # Builds one Patrol APK pair per scenario file in integration_test/.
+    # Patrol's PatrolJUnitRunner is designed for Android Test Orchestrator
+    # (one test per process); without ATO, a bundled multi-test APK 500s on
+    # every test past the first. So instead of bundling, we matrix-build:
+    # one --target per scenario, one APK pair per scenario, uploaded under
+    # the artifact name pattern app-patrol-<debug|androidTest>-<scenario>.apk
+    # so the laptop runner can discover and run each pair sequentially.
+    #
+    # Manual trigger only -- patrol_cli + native instrumentation across 5
+    # parallel jobs is heavier than a regular build.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - s001_login_test
+          - s010_receive_happy_test
+          - s011_receive_duplicate_test
+          - s012_receive_missing_fields_test
+          - s013_receive_crepe_interlock_test
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-java@v3
@@ -165,23 +181,20 @@ jobs:
       - run: flutter pub get
       - name: Install patrol_cli
         run: dart pub global activate patrol_cli
-      - name: Build Patrol APKs
+      - name: Build Patrol APKs for ${{ matrix.scenario }}
         run: |
           export PATH="$PATH":"$HOME/.pub-cache/bin"
-          # all_test.dart aggregates every integration_test/*_test.dart
-          # main() into one entry point. patrol_cli only accepts one
-          # --target, and a single APK pair keeps Tera P60 runs simple.
           patrol build android --flavor qa \
-            --target=integration_test/all_test.dart \
+            --target=integration_test/${{ matrix.scenario }}.dart \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
       - uses: actions/upload-artifact@v4
         with:
-          name: app-patrol-debug.apk
+          name: app-patrol-debug-${{ matrix.scenario }}.apk
           path: build/app/outputs/apk/qa/debug/app-qa-debug.apk
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
-          name: app-patrol-androidTest.apk
+          name: app-patrol-androidTest-${{ matrix.scenario }}.apk
           path: build/app/outputs/apk/androidTest/qa/debug/app-qa-debug-androidTest.apk
           if-no-files-found: warn
