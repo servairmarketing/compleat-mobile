@@ -41,4 +41,6 @@ patrol:
   app_name: compleat_mobile
   test_directory: integration_test
   android:
-    package_name: com.compleat.compleat_mobile
+    # Patrol jobs always build the `test` Android flavor (applicationIdSuffix .test),
+    # so the runtime applicationId Patrol instruments is com.compleat.compleat_mobile.test.
+    package_name: com.compleat.compleat_mobile.test

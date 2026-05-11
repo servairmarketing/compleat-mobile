@@ -42,7 +42,7 @@ jobs:
       - run: flutter pub get
       - name: Build signed APK
         run: |
-          flutter build apk --release \
+          flutter build apk --release --flavor prod \
             --dart-define=KEYSTORE_PATH=compleat-release.jks
         env:
           STORE_FILE: compleat-release.jks
@@ -57,19 +57,19 @@ jobs:
           echo "Version: $VERSION"
           gh release delete "v$VERSION" --yes 2>/dev/null || true
           gh release create "v$VERSION" \
-            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-prod-release.apk \
             --title "Compleat IMS v$VERSION" \
             --notes "Build $GITHUB_SHA" \
             --latest
       - uses: actions/upload-artifact@v4
         with:
           name: compleat-mobile-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-prod-release.apk
 
   build-test-apk:
     # Builds a test-environment APK that points at the test Cloud Run backend.
-    # Same signing keystore as prod (no applicationIdSuffix yet, so this APK
-    # replaces prod on a device when installed; fine for dedicated E2E hardware).
+    # Uses the `test` product flavor (applicationIdSuffix .test) so it installs
+    # alongside the prod APK on the same device with its own data + icon.
     # Triggered by the same events as `build` so every push produces both APKs.
     runs-on: ubuntu-latest
     permissions:
@@ -108,7 +108,7 @@ jobs:
       - run: flutter pub get
       - name: Build signed test APK
         run: |
-          flutter build apk --release \
+          flutter build apk --release --flavor test \
             --dart-define=KEYSTORE_PATH=compleat-release.jks \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
@@ -117,10 +117,6 @@ jobs:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      - name: Rename test APK
-        run: |
-          mv build/app/outputs/flutter-apk/app-release.apk \
-             build/app/outputs/flutter-apk/app-test-release.apk
       - uses: actions/upload-artifact@v4
         with:
           name: app-test-release.apk
@@ -168,17 +164,17 @@ jobs:
       - name: Build Patrol APKs
         run: |
           export PATH="$PATH":"$HOME/.pub-cache/bin"
-          patrol build android \
+          patrol build android --flavor test \
             --target=integration_test/login_test.dart \
             --dart-define=API_BASE=https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app \
             --dart-define=APP_ENV=test
       - uses: actions/upload-artifact@v4
         with:
           name: app-patrol-debug.apk
-          path: build/app/outputs/apk/debug/app-debug.apk
+          path: build/app/outputs/apk/test/debug/app-test-debug.apk
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: app-patrol-androidTest.apk
-          path: build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          path: build/app/outputs/apk/androidTest/test/debug/app-test-debug-androidTest.apk
           if-no-files-found: warn
