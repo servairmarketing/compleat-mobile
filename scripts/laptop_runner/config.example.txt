@@ -1,0 +1,20 @@
+# IMS Test Runner — config template.
+#
+# 1. Copy this file to:  config.txt   (in the same folder)
+# 2. Open config.txt in Notepad.
+# 3. Replace YOUR_GITHUB_PAT_HERE with a real GitHub Personal Access Token.
+# 4. Save. Never commit config.txt — it has your real token.
+#
+# How to create the PAT:
+#   - Go to: https://github.com/settings/tokens
+#   - "Generate new token (classic)"
+#   - Scopes: check BOTH
+#       - 'repo'      (full -- needed to read artifacts)
+#       - 'workflow'  (needed to dispatch the build via the API)
+#     The script triggers a CI build on every run; without 'workflow' the
+#     POST to /actions/workflows/build.yml/dispatches returns 404.
+#   - Expiration: 90 days is fine; renew when it expires.
+#   - Copy the token immediately (GitHub only shows it once) and paste below.
+
+GITHUB_TOKEN=YOUR_GITHUB_PAT_HERE
+REPO=servairmarketing/compleat-mobile

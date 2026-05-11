@@ -1,0 +1,8 @@
+# Local-only files that should never be committed.
+# These are produced by Joe's laptop install -- the master copy in this
+# folder is a pristine template that gets fetched by the script's
+# self-update step.
+config.txt
+logs/
+downloads/
+run_tests.ps1.bak
