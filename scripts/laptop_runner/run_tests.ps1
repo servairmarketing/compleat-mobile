@@ -53,7 +53,7 @@ Start-Transcript -Path $logFile -Append | Out-Null
 # Script version. Bump on every Claude Code edit. The self-update step
 # compares this against the same constant in the remote copy and replaces
 # the local file on disk when remote is newer. Use semver-ish "M.m.p".
-$SCRIPT_VERSION = '1.0.2'
+$SCRIPT_VERSION = '1.0.3'
 
 # package constants -- match android/app/build.gradle.kts qa flavor
 $APP_PACKAGE  = 'com.compleat.compleat_mobile.test'
@@ -127,7 +127,15 @@ function Invoke-SelfUpdate ([string]$Repo, [hashtable]$Headers,
         foreach ($k in $Headers.Keys) { $rawHeaders[$k] = $Headers[$k] }
         $rawHeaders['Accept'] = 'application/vnd.github.raw'
         $resp = Invoke-WebRequest -Headers $rawHeaders -Uri $url -UseBasicParsing
-        $content = [string]$resp.Content
+        # PS 5.1 returns Content as byte[] when the Content-Type isn't on its
+        # text-detection list. application/vnd.github.raw isn't recognized, so
+        # [string]$resp.Content would space-join the bytes ('35 32 32 ...')
+        # instead of decoding them, and every downstream regex would fail.
+        if ($resp.Content -is [byte[]]) {
+            $content = [System.Text.Encoding]::UTF8.GetString($resp.Content)
+        } else {
+            $content = [string]$resp.Content
+        }
         if ($content -match '(?i)<html|<!doctype') {
             Write-Warn 'Update check skipped: remote returned HTML (likely 404 or auth -- check PAT scopes).'
             return
@@ -338,7 +346,7 @@ Write-Host "    URL: $runUrl"
 
 Write-Step 'Building APKs (typical: about 5-7 min on a clean cache)'
 $pollEvery   = 30
-$buildBudget = 15 * 60     # 15 minutes
+$buildBudget = 25 * 60     # 25 minutes
 $buildWaited = 0
 $status      = ''
 $conclusion  = ''
