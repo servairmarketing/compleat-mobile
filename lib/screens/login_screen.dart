@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/api_service.dart';
+import 'forced_password_change_screen.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -16,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordFocusNode = FocusNode();
   final _signInFocusNode = FocusNode();
   bool _loading = false;
+  bool _obscurePassword = true;
   String? _error;
   String _version = '';
 
@@ -45,17 +49,51 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     setState(() { _loading = true; _error = null; });
-    final res = await ApiService.login(
-      _usernameController.text.trim(),
-      _passwordController.text.trim(),
-    );
+    Map<String, dynamic> res;
+    try {
+      res = await ApiService.loginRaw(
+        _usernameController.text.trim(),
+        _passwordController.text.trim(),
+      );
+    } on SocketException {
+      setState(() {
+        _error = 'Cannot reach server. Please check your network connection and try again.';
+        _loading = false;
+      });
+      return;
+    } on http.ClientException {
+      setState(() {
+        _error = 'Cannot reach server. Please check your network connection and try again.';
+        _loading = false;
+      });
+      return;
+    } catch (_) {
+      setState(() {
+        _error = 'Login failed. Please try again.';
+        _loading = false;
+      });
+      return;
+    }
     if (res['token'] != null) {
       await ApiService.saveToken(res['token']);
       await ApiService.saveUserProfile(res['user'] ?? {});
-      if (mounted) Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+      final mustChange = res['must_change_password'] == true;
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => mustChange
+              ? const ForcedPasswordChangeScreen()
+              : const HomeScreen(),
+        ),
+      );
     } else {
-      setState(() { _error = res['detail'] ?? 'Login failed'; _loading = false; });
+      setState(() {
+        _error = res['detail'] is String && (res['detail'] as String).isNotEmpty
+            ? res['detail']
+            : 'Login failed. Please try again.';
+        _loading = false;
+      });
     }
   }
 
@@ -106,15 +144,28 @@ class _LoginScreenState extends State<LoginScreen> {
                           key: const Key('passwordField'),
                           controller: _passwordController,
                           focusNode: _passwordFocusNode,
-                          obscureText: true,
+                          obscureText: _obscurePassword,
                           keyboardType: TextInputType.visiblePassword,
                           textInputAction: TextInputAction.done,
                           style: const TextStyle(fontSize: 18),
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Password',
-                            prefixIcon: Icon(Icons.lock, size: 28),
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+                            prefixIcon: const Icon(Icons.lock, size: 28),
+                            suffixIcon: IconButton(
+                              key: const Key('passwordVisibilityToggle'),
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                size: 26,
+                              ),
+                              tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                              onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                            ),
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
                           ),
                           onSubmitted: (_) {
                             _signInFocusNode.requestFocus();

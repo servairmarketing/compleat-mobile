@@ -69,6 +69,26 @@ class ApiService {
     }
   }
 
+  // Like post(), but does NOT swallow network exceptions — callers can catch
+  // SocketException / ClientException to render a clean message instead of a
+  // raw exception string. Still handles the 401 auto-logout case.
+  static Future<Map<String, dynamic>> postRaw(String endpoint, Map<String, dynamic> body) async {
+    final token = await getToken();
+    final response = await http.post(
+      Uri.parse('$API_BASE$endpoint'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(body),
+    ).timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await logout();
+      return {'success': false, 'detail': 'session_expired'};
+    }
+    return jsonDecode(response.body);
+  }
+
   static Future<Map<String, dynamic>> get(String endpoint) async {
     try {
       final token = await getToken();
@@ -100,5 +120,17 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'detail': e.toString()};
     }
+  }
+
+  // Like login(), but does NOT swallow network exceptions — callers can catch
+  // SocketException / ClientException to render a clean message instead of a
+  // raw exception string.
+  static Future<Map<String, dynamic>> loginRaw(String username, String password) async {
+    final response = await http.post(
+      Uri.parse('$API_BASE/auth/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    ).timeout(const Duration(seconds: 15));
+    return jsonDecode(response.body);
   }
 }

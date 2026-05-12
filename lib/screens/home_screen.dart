@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'printer_settings_screen.dart';
+import 'settings_screen.dart';
 import '../services/api_service.dart';
 import '../services/update_service.dart';
 import 'login_screen.dart';
@@ -230,11 +230,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: const Color(0xFFf4b400),
                         onTap: () => _navigate(const HistoryScreen())),
                     _MenuCard(
-                        key: const Key('menuCard_printerSettings'),
-                        icon: Icons.print_rounded, label: 'Printer Settings',
-                        description: 'Configure label printer',
-                        color: const Color(0xFFe53935),
-                        onTap: () => _navigate(const PrinterSettingsScreen())),
+                        key: const Key('menuCard_settings'),
+                        icon: Icons.settings, label: 'Settings',
+                        description: 'Printer, password & device settings',
+                        color: const Color(0xFF607D8B),
+                        onTap: () => _navigate(const SettingsScreen())),
                   ],
                 ),
               ),
