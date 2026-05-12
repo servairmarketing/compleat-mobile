@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/printer_service.dart';
+import 'validation_dialog.dart';
 
 class ProductionScreen extends StatefulWidget {
   const ProductionScreen({super.key});
@@ -629,19 +630,24 @@ class _ProductionScreenState extends State<ProductionScreen>
     // matches the toggle state of every committed scan.
     final batchTwoParent = _rpBatchMode ?? _rpTwoParent;
 
-    if (p1.isEmpty) { _showMessage('Parent Roll ID is required.', false); return; }
-    if (batchTwoParent && p2.isEmpty) { _showMessage('Please enter the second Parent Roll ID.', false); return; }
-    if (_scannedItems.isEmpty) { _showMessage('Please scan at least one child roll.', false); return; }
-    if (_rpFirstScanProduct != null) { _showMessage('Finish the second scan of the pending splice roll before submitting.', false); return; }
+    final issues = <String>[];
+    if (p1.isEmpty) issues.add('Parent Roll ID is required');
+    if (batchTwoParent && p2.isEmpty) issues.add('Second Parent Roll ID is required');
+    if (_scannedItems.isEmpty) issues.add('At least one child roll must be scanned');
+    if (_rpFirstScanProduct != null) {
+      issues.add('Finish the second scan of the pending splice roll before submitting');
+    }
     // A parent used in production has been at least partially consumed — it
     // can't stay "in_stock". Force operator to pick Production or Finished
     // for each parent in scope.
     if (_selectedStatus1.isEmpty) {
-      _showMessage('Please select status for parent roll 1: Production or Finished.', false);
-      return;
+      issues.add('Status for parent roll 1 must be Production or Finished');
     }
     if (batchTwoParent && _selectedStatus2.isEmpty) {
-      _showMessage('Please select status for parent roll 2: Production or Finished.', false);
+      issues.add('Status for parent roll 2 must be Production or Finished');
+    }
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
       return;
     }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import 'home_screen.dart';
+import 'validation_dialog.dart';
 
 class ForcedPasswordChangeScreen extends StatefulWidget {
   const ForcedPasswordChangeScreen({super.key});
@@ -34,16 +35,20 @@ class _ForcedPasswordChangeScreenState extends State<ForcedPasswordChangeScreen>
     final oldPw = _oldCtl.text;
     final newPw = _newCtl.text;
     final confirmPw = _confirmCtl.text;
-    if (oldPw.isEmpty) {
-      setState(() => _error = 'Enter your current (temporary) password.');
-      return;
+    final issues = <String>[];
+    if (oldPw.isEmpty) issues.add('Current (temporary) password is required');
+    if (newPw.isEmpty) {
+      issues.add('New password is required');
+    } else if (newPw.length < 8) {
+      issues.add('New password must be at least 8 characters');
     }
-    if (newPw.length < 8) {
-      setState(() => _error = 'New password must be at least 8 characters.');
-      return;
+    if (confirmPw.isEmpty) {
+      issues.add('Confirm password is required');
+    } else if (newPw.isNotEmpty && newPw != confirmPw) {
+      issues.add('New password and confirm password do not match');
     }
-    if (newPw != confirmPw) {
-      setState(() => _error = 'New passwords do not match.');
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
       return;
     }
     setState(() => _loading = true);

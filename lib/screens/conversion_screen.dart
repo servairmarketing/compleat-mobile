@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
+import 'validation_dialog.dart';
 
 class ConversionScreen extends StatefulWidget {
   const ConversionScreen({super.key});
@@ -309,16 +310,14 @@ class _ConversionScreenState extends State<ConversionScreen> {
 
   // ── Submit ───────────────────────────────────────────────────────
   Future<void> _submitConversion() async {
-    if (_sourceData == null) {
-      _showMessage('Identify the source roll first.', false);
-      return;
-    }
-    if (_sourceStatus.isEmpty) {
-      _showMessage('Select source status: Production or Finished.', false);
-      return;
-    }
+    final issues = <String>[];
+    if (_sourceData == null) issues.add('Source roll must be identified first');
+    if (_sourceStatus.isEmpty) issues.add('Source status must be Production or Finished');
     if (_newProductId == null || _newRollsCount < 1) {
-      _showMessage('Scan at least one new roll.', false);
+      issues.add('At least one new roll must be scanned');
+    }
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
       return;
     }
 

@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/printer_service.dart';
 import 'login_screen.dart';
+import 'validation_dialog.dart';
 
 class StocktakeScreen extends StatefulWidget {
   const StocktakeScreen({super.key});
@@ -299,7 +300,8 @@ Widget _stField(String label, TextEditingController controller,
     {bool autofocus = false, String? hint,
      FocusNode? focusNode, bool multiline = false,
      TextInputType? keyboardType, TextInputAction? textInputAction,
-     Function(String)? onSubmitted, Key? widgetKey}) {
+     Function(String)? onSubmitted, Function(String)? onChanged,
+     String? errorText, Key? widgetKey}) {
   return TextField(
     key: widgetKey,
     controller: controller,
@@ -314,10 +316,12 @@ Widget _stField(String label, TextEditingController controller,
     maxLines: multiline ? 3 : 1,
     minLines: multiline ? 1 : null,
     onSubmitted: onSubmitted,
+    onChanged: onChanged,
     style: const TextStyle(fontSize: 18),
     decoration: InputDecoration(
       labelText: label,
       hintText: hint,
+      errorText: errorText,
       border: const OutlineInputBorder(),
       contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
     ),
@@ -407,12 +411,50 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   String? _message;
   bool _ok = false;
 
+  // Bug #6 — inline duplicate Roll ID check.
+  String? _rollIdError;
+  String _lastCheckedRollId = '';
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
     });
+    _rollIdFocus.addListener(() {
+      if (!_rollIdFocus.hasFocus) {
+        _checkRollIdDuplicate(_rollIdCtrl.text.trim());
+      }
+    });
+  }
+
+  Future<void> _checkRollIdDuplicate(String rollId) async {
+    if (rollId.isEmpty) {
+      if (_rollIdError != null) setState(() => _rollIdError = null);
+      _lastCheckedRollId = '';
+      return;
+    }
+    if (rollId == _lastCheckedRollId) return;
+    _lastCheckedRollId = rollId;
+    final res = await ApiService.get('/rolls/$rollId');
+    if (!mounted) return;
+    if (res['roll'] != null) {
+      if (_rollIdCtrl.text.trim() == rollId) {
+        setState(() => _rollIdError =
+            'Roll ID already exists. Please scan a different roll or correct the value.');
+      }
+    } else {
+      if (_rollIdCtrl.text.trim() == rollId) {
+        setState(() => _rollIdError = null);
+      }
+    }
+  }
+
+  void _onRollIdChanged(String value) {
+    if (_rollIdError != null) {
+      setState(() => _rollIdError = null);
+    }
+    _lastCheckedRollId = '';
   }
 
   @override
@@ -425,14 +467,26 @@ class _InitialParentFormState extends State<_InitialParentForm> {
 
   Future<void> _submit() async {
     final rollId = _rollIdCtrl.text.trim();
-    if (rollId.isEmpty) {
-      setState(() { _message = 'Roll ID is required.'; _ok = false; }); return;
+    final issues = <String>[];
+    if (rollId.isEmpty) issues.add('Roll ID is required');
+    if (_rollIdError != null) issues.add('Roll ID already exists — please correct before submitting');
+    if (_vendor == null) issues.add('Vendor is required');
+    if (_materialType == null) issues.add('Material Type is required');
+    if (_basisWeight == null) issues.add('Basis Weight is required');
+    if (_width == null) issues.add('Width is required');
+    if (_lengthCtrl.text.trim().isEmpty) {
+      issues.add('Length is required');
+    } else if (double.tryParse(_lengthCtrl.text.trim()) == null) {
+      issues.add('Length must be a number');
     }
-    if (_vendor == null || _materialType == null || _basisWeight == null || _width == null) {
-      setState(() { _message = 'Vendor, Material Type, Basis Weight and Width are required.'; _ok = false; }); return;
+    if (_weightCtrl.text.trim().isEmpty) {
+      issues.add('Weight is required');
+    } else if (double.tryParse(_weightCtrl.text.trim()) == null) {
+      issues.add('Weight must be a number');
     }
-    if (_lengthCtrl.text.trim().isEmpty || _weightCtrl.text.trim().isEmpty) {
-      setState(() { _message = 'Length and Weight are required.'; _ok = false; }); return;
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
+      return;
     }
     setState(() => _submitting = true);
     final res = await ApiService.post('/stocktake/parent', {
@@ -467,7 +521,9 @@ class _InitialParentFormState extends State<_InitialParentForm> {
     setState(() {
       _vendor = null; _materialType = null;
       _basisWeight = null; _width = null;
+      _rollIdError = null;
     });
+    _lastCheckedRollId = '';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
     });
@@ -494,7 +550,10 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 widgetKey: const Key('stocktakeRollIdField'),
                 hint: 'Operator-entered, must be unique',
                 keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next),
+                textInputAction: TextInputAction.next,
+                onChanged: _onRollIdChanged,
+                errorText: _rollIdError,
+                onSubmitted: (val) => _checkRollIdDuplicate(val.trim())),
             const SizedBox(height: 14),
             DropdownSearch<String>(
               key: const Key('stocktakeVendorDropdown'),
@@ -583,7 +642,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
               height: 56,
               child: ElevatedButton.icon(
                 key: const Key('stocktakeSubmitButton'),
-                onPressed: _submitting ? null : _submit,
+                onPressed: (_submitting || _rollIdError != null) ? null : _submit,
                 icon: _submitting
                     ? const SizedBox(width: 20, height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -645,21 +704,29 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   Future<void> _submit() async {
     final p1 = _parent1Ctrl.text.trim();
     final p2 = _parent2Ctrl.text.trim();
-    if (p1.isEmpty) {
-      setState(() { _message = 'Parent Roll ID is required.'; _ok = false; }); return;
-    }
-    if (_twoParent && p2.isEmpty) {
-      setState(() { _message = 'Second Parent Roll ID is required.'; _ok = false; }); return;
-    }
-    if (_productId == null) {
-      setState(() { _message = 'Product is required.'; _ok = false; }); return;
-    }
+    final issues = <String>[];
+    if (p1.isEmpty) issues.add('Parent Roll ID is required');
+    if (_twoParent && p2.isEmpty) issues.add('Second Parent Roll ID is required');
+    if (_productId == null) issues.add('Product is required');
     final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
-    if (qty < 1) {
-      setState(() { _message = 'Quantity must be 1 or more.'; _ok = false; }); return;
+    if (_qtyCtrl.text.trim().isEmpty) {
+      issues.add('Quantity is required');
+    } else if (qty < 1) {
+      issues.add('Quantity must be 1 or more');
     }
-    if (_lengthCtrl.text.trim().isEmpty || _weightCtrl.text.trim().isEmpty) {
-      setState(() { _message = 'Length and Weight are required.'; _ok = false; }); return;
+    if (_lengthCtrl.text.trim().isEmpty) {
+      issues.add('Length is required');
+    } else if (double.tryParse(_lengthCtrl.text.trim()) == null) {
+      issues.add('Length must be a number');
+    }
+    if (_weightCtrl.text.trim().isEmpty) {
+      issues.add('Weight is required');
+    } else if (double.tryParse(_weightCtrl.text.trim()) == null) {
+      issues.add('Weight must be a number');
+    }
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
+      return;
     }
     setState(() => _submitting = true);
     final parents = _twoParent ? [p1, p2] : [p1];

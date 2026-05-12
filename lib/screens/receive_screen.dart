@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
 import 'login_screen.dart';
+import 'validation_dialog.dart';
 
 class ReceiveScreen extends StatefulWidget {
   const ReceiveScreen({super.key});
@@ -49,12 +50,24 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String? _message;
   bool _messageSuccess = false;
 
+  // Bug #6 — inline duplicate Roll ID check.
+  String? _rollIdError;          // shown under the Roll ID field
+  String _lastCheckedRollId = '';// avoid hitting the API for unchanged value
+  bool _rollIdChecking = false;
+
   @override
   void initState() {
     super.initState();
     _loadMasters();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocusNode.requestFocus();
+    });
+    // Check for duplicate Roll ID when the field loses focus (typed entry).
+    // Scan-completed events fire onSubmitted, which is wired separately.
+    _rollIdFocusNode.addListener(() {
+      if (!_rollIdFocusNode.hasFocus) {
+        _checkRollIdDuplicate(_rollIdController.text.trim());
+      }
     });
   }
 
@@ -138,21 +151,66 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  Future<void> _submit() async {
-    if (_selectedVendor == null || _selectedMaterialType == null || _selectedBasisWeight == null) {
-      setState(() {
-        _message = 'Vendor, Material Type and Basis Weight are required.';
-        _messageSuccess = false;
-      });
+  Future<void> _checkRollIdDuplicate(String rollId) async {
+    if (rollId.isEmpty) {
+      // Empty is allowed in Receive — server auto-generates.
+      if (_rollIdError != null) setState(() => _rollIdError = null);
+      _lastCheckedRollId = '';
       return;
     }
-    if (_selectedWidth == null ||
-        _lengthController.text.trim().isEmpty ||
-        _weightController.text.trim().isEmpty) {
-      setState(() {
-        _message = 'Width, Length and Weight are required.';
-        _messageSuccess = false;
-      });
+    if (rollId == _lastCheckedRollId) return;
+    _lastCheckedRollId = rollId;
+    setState(() => _rollIdChecking = true);
+    final res = await ApiService.get('/rolls/$rollId');
+    if (!mounted) return;
+    setState(() => _rollIdChecking = false);
+    // /rolls/{id} returns {"roll": {...}} on hit, {"detail": "...not found."} on
+    // 404. Anything else (network error / session_expired) we silently ignore;
+    // the server-side check at submit time is the final guard.
+    if (res['roll'] != null) {
+      // Only set the error if the field hasn't been edited since.
+      if (_rollIdController.text.trim() == rollId) {
+        setState(() => _rollIdError =
+            'Roll ID already exists. Please scan a different roll or correct the value.');
+      }
+    } else {
+      if (_rollIdController.text.trim() == rollId) {
+        setState(() => _rollIdError = null);
+      }
+    }
+  }
+
+  void _onRollIdChanged(String value) {
+    // If the user edits the value after we flagged it, clear the error until
+    // the next focus-out or submit triggers a re-check.
+    if (_rollIdError != null) {
+      setState(() => _rollIdError = null);
+    }
+    _lastCheckedRollId = '';
+  }
+
+  Future<void> _submit() async {
+    final issues = <String>[];
+    if (_selectedVendor == null) issues.add('Vendor is required');
+    if (_poController.text.trim().isEmpty) issues.add('PO Number is required');
+    if (_selectedMaterialType == null) issues.add('Material Type is required');
+    if (_selectedBasisWeight == null) issues.add('Basis Weight is required');
+    if (_selectedWidth == null) issues.add('Width is required');
+    if (_lengthController.text.trim().isEmpty) {
+      issues.add('Length is required');
+    } else if (double.tryParse(_lengthController.text.trim()) == null) {
+      issues.add('Length must be a number');
+    }
+    if (_weightController.text.trim().isEmpty) {
+      issues.add('Weight is required');
+    } else if (double.tryParse(_weightController.text.trim()) == null) {
+      issues.add('Weight must be a number');
+    }
+    if (_rollIdError != null) {
+      issues.add('Roll ID already exists — please correct before submitting');
+    }
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
       return;
     }
     setState(() => _submitting = true);
@@ -192,7 +250,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedVendor = null;
       _selectedMaterialType = null;
       _selectedBasisWeight = null;
+      _rollIdError = null;
     });
+    _lastCheckedRollId = '';
     FocusScope.of(context).unfocus();
     if (_scrollController.hasClients) {
       _scrollController.animateTo(0,
@@ -246,7 +306,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     focusNode: _rollIdFocusNode,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    onSubmitted: (_) => _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey)),
+                    onChanged: _onRollIdChanged,
+                    errorText: _rollIdError,
+                    onSubmitted: (val) {
+                      _checkRollIdDuplicate(val.trim());
+                      _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
+                    }),
                 const SizedBox(height: 14),
 
                 _buildVendorDropdown(),
@@ -355,7 +420,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         height: 56,
                         child: ElevatedButton.icon(
                           key: const Key('submitButton'),
-                          onPressed: _submitting ? null : _submit,
+                          onPressed: (_submitting || _rollIdError != null) ? null : _submit,
                           icon: _submitting
                             ? const SizedBox(width: 20, height: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -389,7 +454,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       {bool autofocus = false, String? hint,
        FocusNode? focusNode, bool multiline = false,
        TextInputType? keyboardType, TextInputAction? textInputAction,
-       Function(String)? onSubmitted, Key? widgetKey}) {
+       Function(String)? onSubmitted, Function(String)? onChanged,
+       String? errorText, Key? widgetKey}) {
     return TextField(
       key: widgetKey,
       controller: controller,
@@ -404,10 +470,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       maxLines: multiline ? 3 : 1,
       minLines: multiline ? 1 : null,
       onSubmitted: onSubmitted,
+      onChanged: onChanged,
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        errorText: errorText,
         border: const OutlineInputBorder(),
         contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
       ),

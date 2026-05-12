@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import '../services/api_service.dart';
+import 'validation_dialog.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -226,22 +227,13 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   Future<void> _submit() async {
-    if (_company == null) { _showMessage('Select a company.', false); return; }
-    if (_selectedCustomer == null) {
-      _showMessage('Select a customer.', false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _customerKey.currentState?.openDropDownSearch();
-      });
-      return;
-    }
-    if (_invoiceController.text.trim().isEmpty) {
-      _showMessage('Enter an invoice number.', false);
-      _invoiceFocus.requestFocus();
-      return;
-    }
-    if (_lines.isEmpty) {
-      _showMessage('Scan at least one roll.', false);
-      _scanFocus.requestFocus();
+    final issues = <String>[];
+    if (_company == null) issues.add('Company is required');
+    if (_selectedCustomer == null) issues.add('Customer is required');
+    if (_invoiceController.text.trim().isEmpty) issues.add('Invoice Number is required');
+    if (_lines.isEmpty) issues.add('At least one roll must be scanned');
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
       return;
     }
 
