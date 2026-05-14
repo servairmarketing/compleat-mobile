@@ -8,6 +8,7 @@ import '../services/local_db.dart';
 import '../services/printer_service.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
+import '../services/scan_dedupe.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -18,7 +19,7 @@ class ProductionScreen extends StatefulWidget {
 }
 
 class _ProductionScreenState extends State<ProductionScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, ScanDedupe {
   late TabController _tabController;
   int _lastTabIndex = 0;
 
@@ -931,7 +932,9 @@ class _ProductionScreenState extends State<ProductionScreen>
                 ),
                 autofocus: true,
               ),
-              constraints: const BoxConstraints(maxHeight: 300),
+              // Bug #18 — cap at ~40% of viewport so the auto-opened dropdown
+              // leaves the previously-completed field visible above it.
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               itemBuilder: (context, item, isSelected) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 child: Text(item, style: TextStyle(
@@ -1224,9 +1227,18 @@ class _ProductionScreenState extends State<ProductionScreen>
                 contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
                 prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
               ),
-              onSubmitted: (v) { _processScan(v); _rpScanFocus.requestFocus(); },
+              // Bug #17 — onSubmitted skips if this scan was just handled by
+              // onChanged's terminator trigger (idempotency guard).
+              onSubmitted: (v) {
+                if (!isDuplicateScan(v)) _processScan(v);
+                _rpScanFocus.requestFocus();
+              },
+              // Bug #17 — trigger only on an explicit scan terminator, never
+              // on a length heuristic that could fire mid-burst.
               onChanged: (v) {
-                if (v.endsWith('\n') || v.length > 20) _processScan(v);
+                final fired = v.contains('\n') || v.contains('\r');
+                debugScan('rpScan', v, fired);
+                if (fired) { recordScan(v); _processScan(v); }
               },
             ),
           const SizedBox(height: 12),

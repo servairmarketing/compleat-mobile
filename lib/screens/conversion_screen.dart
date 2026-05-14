@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
+import '../services/scan_dedupe.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -14,7 +15,7 @@ class ConversionScreen extends StatefulWidget {
   State<ConversionScreen> createState() => _ConversionScreenState();
 }
 
-class _ConversionScreenState extends State<ConversionScreen> {
+class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
   // ── Source identification ─────────────────────────────────────────
   // The source is an existing CHILD roll. Operator scans its composite
   // label(s) to identify it. Single-parent sources need one scan;
@@ -541,9 +542,15 @@ class _ConversionScreenState extends State<ConversionScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2)))
                     : const Icon(Icons.qr_code_scanner, size: 28),
               ),
-              onSubmitted: (v) { _handleSourceScan(v); },
+              // Bug #17 — onSubmitted skips the onChanged/onSubmitted
+              // double-fire; onChanged triggers only on a scan terminator.
+              onSubmitted: (v) {
+                if (!isDuplicateScan(v)) _handleSourceScan(v);
+              },
               onChanged: (v) {
-                if (v.endsWith('\n') || v.length > 20) _handleSourceScan(v);
+                final fired = v.contains('\n') || v.contains('\r');
+                debugScan('sourceScan', v, fired);
+                if (fired) { recordScan(v); _handleSourceScan(v); }
               },
             ),
         ] else ...[
@@ -719,9 +726,15 @@ class _ConversionScreenState extends State<ConversionScreen> {
             contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
             prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
           ),
-          onSubmitted: (v) { _handleNewRollScan(v); },
+          // Bug #17 — onSubmitted skips the onChanged/onSubmitted double-fire;
+          // onChanged triggers only on a scan terminator.
+          onSubmitted: (v) {
+            if (!isDuplicateScan(v)) _handleNewRollScan(v);
+          },
           onChanged: (v) {
-            if (v.endsWith('\n') || v.length > 20) _handleNewRollScan(v);
+            final fired = v.contains('\n') || v.contains('\r');
+            debugScan('newRollScan', v, fired);
+            if (fired) { recordScan(v); _handleNewRollScan(v); }
           },
         ),
       ],

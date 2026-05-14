@@ -4,6 +4,7 @@ import 'package:dropdown_search/dropdown_search.dart';
 import '../services/api_service.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
+import '../services/scan_dedupe.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -13,7 +14,7 @@ class SalesScreen extends StatefulWidget {
   State<SalesScreen> createState() => _SalesScreenState();
 }
 
-class _SalesScreenState extends State<SalesScreen> {
+class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
   // Company
   String? _company; // 'compleat' | 'servair'
 
@@ -431,7 +432,10 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                             autofocus: true,
                           ),
-                          constraints: const BoxConstraints(maxHeight: 420),
+                          // Bug #18 — cap at ~40% of viewport so the
+                          // auto-opened customer dropdown leaves the field
+                          // above it visible.
+                          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
                           itemBuilder: (context, item, isSelected) => Padding(
                             padding: const EdgeInsets.symmetric(
                                 vertical: 12, horizontal: 16),
@@ -544,11 +548,16 @@ class _SalesScreenState extends State<SalesScreen> {
                               )
                             : const Icon(Icons.qr_code_scanner, size: 28),
                       ),
+                      // Bug #17 — onSubmitted skips the onChanged/onSubmitted
+                      // double-fire; onChanged triggers only on a scan
+                      // terminator (standardised with the other scan fields).
                       onSubmitted: (v) async {
-                        await _handleScan(v);
+                        if (!isDuplicateScan(v)) await _handleScan(v);
                       },
                       onChanged: (v) {
-                        if (v.endsWith('\n')) _handleScan(v);
+                        final fired = v.contains('\n') || v.contains('\r');
+                        debugScan('salesScan', v, fired);
+                        if (fired) { recordScan(v); _handleScan(v); }
                       },
                     ),
                   const SizedBox(height: 12),

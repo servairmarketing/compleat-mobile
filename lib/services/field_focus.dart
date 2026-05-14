@@ -37,11 +37,14 @@ class FieldFocus {
         openDropdown?.currentState?.openDropDownSearch();
         final tctx = target.context;
         if (tctx != null) {
-          // alignment 0.3 → target sits 30% from the top, leaving the
-          // previously-completed field visible above it.
+          // Bug #18 — alignment 0.5 sits the new field at mid-viewport, so
+          // its auto-opened dropdown (which renders below it, capped at ~40%
+          // of viewport height — see each DropdownSearch's constraints) fills
+          // the lower half and the previously-completed field's VALUE stays
+          // visible in the upper half.
           Scrollable.ensureVisible(
             tctx,
-            alignment: 0.3,
+            alignment: 0.5,
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
           );

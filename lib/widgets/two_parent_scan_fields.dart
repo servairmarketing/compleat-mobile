@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/field_focus.dart';
+import '../services/scan_dedupe.dart';
 
 /// Bug #15 — two-parent scans use two separate, always-visible scan fields.
 ///
@@ -131,9 +132,15 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
         contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
         prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
       ),
+      // Bug #17 — trigger only on an explicit scan terminator, never on a
+      // length heuristic that could fire mid-burst and truncate the value.
+      // The onChanged/onSubmitted double-fire is absorbed by _onField2Done's
+      // `_processing` guard + post-pair clear (see below).
       onSubmitted: (_) => onDone(),
       onChanged: (v) {
-        if (v.endsWith('\n') || v.trim().length > 20) onDone();
+        final fired = v.contains('\n') || v.contains('\r');
+        debugScan('twoParentScan', v, fired);
+        if (fired) onDone();
       },
     );
   }

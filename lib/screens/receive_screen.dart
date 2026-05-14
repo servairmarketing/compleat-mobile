@@ -557,7 +557,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             ),
             autofocus: true,
           ),
-          constraints: const BoxConstraints(maxHeight: 300),
+          // Bug #18 — cap at ~40% of viewport so the auto-opened dropdown
+          // leaves the previously-completed field visible above it.
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
           itemBuilder: (context, item, isSelected) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             child: Text(item, style: TextStyle(
@@ -604,7 +606,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         ),
         popupProps: PopupProps.menu(
           showSearchBox: items.length > 5,
-          constraints: const BoxConstraints(maxHeight: 250),
+          // Bug #18 — cap at ~40% of viewport so the auto-opened dropdown
+          // leaves the previously-completed field visible above it.
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
           itemBuilder: (context, item, isSelected) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             child: Text(item, style: TextStyle(
