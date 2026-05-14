@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import '../services/api_service.dart';
+import '../services/field_focus.dart';
+import '../services/form_state_cache.dart';
+import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
 class SalesScreen extends StatefulWidget {
@@ -46,8 +49,49 @@ class _SalesScreenState extends State<SalesScreen> {
 
   final _scrollController = ScrollController();
 
+  // Bug #14 — in-memory form-state cache key for this screen.
+  static const _cacheKey = 'sales';
+
+  @override
+  void initState() {
+    super.initState();
+    // Bug #14 — restore any in-progress entry preserved on nav-away,
+    // including the scanned-items list.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _company = snap['company'];
+      _selectedCustomer = snap['customer'];
+      _invoiceController.text = snap['invoice'] ?? '';
+      _twoParent = snap['twoParent'] ?? false;
+      _notesController.text = snap['notes'] ?? '';
+      if (snap['lines'] is List) {
+        _lines.addAll((snap['lines'] as List).cast<_SaleLine>());
+      }
+      if (snap['customerCache'] is Map) {
+        _customerCache.addAll(
+            Map<String, List<Map<String, dynamic>>>.from(snap['customerCache']));
+      }
+      // If a company was restored but its customers aren't cached, reload.
+      if (_company != null && !_customerCache.containsKey(_company)) {
+        _loadCustomers(_company!);
+      }
+    }
+  }
+
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry (incl. scan lines) before disposing.
+    // In-memory only — never persisted to disk.
+    FormStateCache.write(_cacheKey, {
+      'company': _company,
+      'customer': _selectedCustomer,
+      'invoice': _invoiceController.text,
+      'twoParent': _twoParent,
+      'notes': _notesController.text,
+      'lines': List<_SaleLine>.from(_lines),
+      'customerCache':
+          Map<String, List<Map<String, dynamic>>>.from(_customerCache),
+    });
     _invoiceController.dispose();
     _invoiceFocus.dispose();
     _scanController.dispose();
@@ -93,7 +137,8 @@ class _SalesScreenState extends State<SalesScreen> {
     });
     await _loadCustomers(company);
     if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Bug #11 — brief delay before auto-opening the customer dropdown.
+    Future.delayed(FieldFocus.advanceDelay, () {
       if (mounted) _customerKey.currentState?.openDropDownSearch();
     });
   }
@@ -120,6 +165,8 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
+  // Single-parent scan handler. Two-parent mode uses _onTwoParentPair via the
+  // shared TwoParentScanFields widget, so this only runs in single mode.
   Future<void> _handleScan(String raw) async {
     if (_company == null) {
       _resetScan();
@@ -138,43 +185,6 @@ class _SalesScreenState extends State<SalesScreen> {
     }
     if (raw.trim().isEmpty) return;
 
-    if (_twoParent) {
-      // Two-parent mode: collect both labels then process together.
-      if (_pendingFirstScan == null) {
-        final p = _parseComposite(raw);
-        if (p == null) {
-          _resetScan();
-          _showMessage('Invalid barcode. Expected ProductID-ParentID.', false);
-          return;
-        }
-        setState(() => _pendingFirstScan = raw.trim());
-        _scanController.clear();
-        HapticFeedback.lightImpact();
-        if (mounted) _scanFocus.requestFocus();
-        return;
-      }
-      final p1 = _parseComposite(_pendingFirstScan!);
-      final p2 = _parseComposite(raw);
-      if (p1 == null || p2 == null) {
-        _resetScan();
-        _showMessage('Invalid barcode. Expected ProductID-ParentID.', false);
-        return;
-      }
-      if (p1.productId != p2.productId) {
-        _resetScan();
-        _showMessage('Both labels must be from the same product roll.', false);
-        return;
-      }
-      if (p1.parentId == p2.parentId) {
-        _resetScan();
-        _showMessage('Both labels share the same parent roll. Scan two different parents.', false);
-        return;
-      }
-      await _addOrIncrement(p1.productId, [p1.parentId, p2.parentId]);
-      return;
-    }
-
-    // Single-parent mode
     final p = _parseComposite(raw);
     if (p == null) {
       _resetScan();
@@ -184,7 +194,41 @@ class _SalesScreenState extends State<SalesScreen> {
     await _addOrIncrement(p.productId, [p.parentId]);
   }
 
-  Future<void> _addOrIncrement(String productId, List<String> parentIds) async {
+  // Bug #15 — two-parent pair handler. Receives the two raw composite scans
+  // from the shared TwoParentScanFields widget; runs the same validation the
+  // old single-field state machine did.
+  Future<void> _onTwoParentPair(String scan1, String scan2) async {
+    if (_company == null) {
+      _showMessage('Select a company first.', false);
+      return;
+    }
+    if (_selectedCustomer == null) {
+      _showMessage('Select a customer first.', false);
+      return;
+    }
+    if (_invoiceController.text.trim().isEmpty) {
+      _showMessage('Enter an invoice number first.', false);
+      return;
+    }
+    final p1 = _parseComposite(scan1);
+    final p2 = _parseComposite(scan2);
+    if (p1 == null || p2 == null) {
+      _showMessage('Invalid barcode. Expected ProductID-ParentID.', false);
+      return;
+    }
+    if (p1.productId != p2.productId) {
+      _showMessage('Both labels must be from the same product roll.', false);
+      return;
+    }
+    if (p1.parentId == p2.parentId) {
+      _showMessage('Both labels share the same parent roll. Scan two different parents.', false);
+      return;
+    }
+    await _addOrIncrement(p1.productId, [p1.parentId, p2.parentId], fromTwoParent: true);
+  }
+
+  Future<void> _addOrIncrement(String productId, List<String> parentIds,
+      {bool fromTwoParent = false}) async {
     setState(() => _checkingStock = true);
     final qs = parentIds.join(',');
     final res = await ApiService.get(
@@ -195,7 +239,9 @@ class _SalesScreenState extends State<SalesScreen> {
 
     final available = (res['available'] is num) ? (res['available'] as num).toInt() : 0;
     if (res['error'] != null || available <= 0) {
-      _resetScan();
+      // In two-parent mode the TwoParentScanFields widget owns focus + clears
+      // its own fields, so don't yank focus back to the single scan field.
+      _resetScan(focus: !fromTwoParent);
       _showMessage('Out of stock or roll already sold.', false);
       return;
     }
@@ -219,7 +265,7 @@ class _SalesScreenState extends State<SalesScreen> {
     });
     _scanController.clear();
     HapticFeedback.lightImpact();
-    if (mounted) _scanFocus.requestFocus();
+    if (mounted && !fromTwoParent) _scanFocus.requestFocus();
   }
 
   void _removeLine(String key) {
@@ -227,6 +273,14 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   Future<void> _submit() async {
+    // Bug #12 — if the operator typed a composite into the (single-parent)
+    // scan field without pressing Enter, treat it as a final scan attempt
+    // before validating.
+    if (!_twoParent && _scanController.text.trim().isNotEmpty) {
+      await _handleScan(_scanController.text);
+      if (!mounted) return;
+    }
+
     final issues = <String>[];
     if (_company == null) issues.add('Company is required');
     if (_selectedCustomer == null) issues.add('Customer is required');
@@ -287,15 +341,6 @@ class _SalesScreenState extends State<SalesScreen> {
     final customers = _company == null
         ? const <Map<String, dynamic>>[]
         : (_customerCache[_company!] ?? const []);
-
-    String scanLabel;
-    if (_twoParent) {
-      scanLabel = _pendingFirstScan == null
-          ? 'Scan label 1 of 2'
-          : 'Scan label 2 of 2';
-    } else {
-      scanLabel = 'Scan composite barcode';
-    }
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -416,9 +461,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         onChanged: (val) {
                           setState(() => _selectedCustomer = val);
                           if (val != null) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted) _invoiceFocus.requestFocus();
-                            });
+                            FieldFocus.advance(context, target: _invoiceFocus);
                           }
                         },
                       ),
@@ -440,7 +483,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       contentPadding: EdgeInsets.symmetric(
                           vertical: 18, horizontal: 14),
                     ),
-                    onSubmitted: (_) => _scanFocus.requestFocus(),
+                    onSubmitted: (_) => FieldFocus.advance(context, target: _scanFocus),
                   ),
                   const SizedBox(height: 12),
 
@@ -467,36 +510,47 @@ class _SalesScreenState extends State<SalesScreen> {
                   const SizedBox(height: 12),
 
                   // ── Scan ─────────────────────────────────
-                  TextField(
-                    key: const Key('salesScanField'),
-                    controller: _scanController,
-                    focusNode: _scanFocus,
-                    autofocus: false,
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.done,
-                    style: const TextStyle(fontSize: 18),
-                    decoration: InputDecoration(
-                      labelText: scanLabel,
-                      hintText: 'Scan here...',
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(
-                          vertical: 18, horizontal: 14),
-                      prefixIcon: _checkingStock
-                          ? const Padding(
-                              padding: EdgeInsets.all(14),
-                              child: SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2)),
-                            )
-                          : const Icon(Icons.qr_code_scanner, size: 28),
+                  // Bug #15 — two-parent mode shows TWO always-visible scan
+                  // fields via the shared widget; single-parent keeps the one
+                  // composite-barcode field.
+                  if (_twoParent)
+                    TwoParentScanFields(
+                      key: const Key('salesTwoParentScan'),
+                      firstFieldFocusNode: _scanFocus,
+                      enabled: !_checkingStock,
+                      onPair: _onTwoParentPair,
+                    )
+                  else
+                    TextField(
+                      key: const Key('salesScanField'),
+                      controller: _scanController,
+                      focusNode: _scanFocus,
+                      autofocus: false,
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.done,
+                      style: const TextStyle(fontSize: 18),
+                      decoration: InputDecoration(
+                        labelText: 'Scan composite barcode',
+                        hintText: 'Scan here...',
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 18, horizontal: 14),
+                        prefixIcon: _checkingStock
+                            ? const Padding(
+                                padding: EdgeInsets.all(14),
+                                child: SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : const Icon(Icons.qr_code_scanner, size: 28),
+                      ),
+                      onSubmitted: (v) async {
+                        await _handleScan(v);
+                      },
+                      onChanged: (v) {
+                        if (v.endsWith('\n')) _handleScan(v);
+                      },
                     ),
-                    onSubmitted: (v) async {
-                      await _handleScan(v);
-                    },
-                    onChanged: (v) {
-                      if (v.endsWith('\n')) _handleScan(v);
-                    },
-                  ),
                   const SizedBox(height: 12),
 
                   // ── Total + scanned items list ───────────

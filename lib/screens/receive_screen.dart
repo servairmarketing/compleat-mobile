@@ -3,6 +3,8 @@ import 'package:dropdown_search/dropdown_search.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
+import '../services/field_focus.dart';
+import '../services/form_state_cache.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 
@@ -55,10 +57,26 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String _lastCheckedRollId = '';// avoid hitting the API for unchanged value
   bool _rollIdChecking = false;
 
+  // Bug #14 — in-memory form-state cache key for this screen.
+  static const _cacheKey = 'receive';
+
   @override
   void initState() {
     super.initState();
     _loadMasters();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _rollIdController.text = snap['rollId'] ?? '';
+      _poController.text = snap['po'] ?? '';
+      _lengthController.text = snap['length'] ?? '';
+      _weightController.text = snap['weight'] ?? '';
+      _notesController.text = snap['notes'] ?? '';
+      _selectedVendor = snap['vendor'];
+      _selectedMaterialType = snap['materialType'];
+      _selectedBasisWeight = snap['basisWeight'];
+      _selectedWidth = snap['width'];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocusNode.requestFocus();
     });
@@ -73,6 +91,19 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot the current entry before disposing controllers so
+    // returning to the screen restores it. In-memory only — never persisted.
+    FormStateCache.write(_cacheKey, {
+      'rollId': _rollIdController.text,
+      'po': _poController.text,
+      'length': _lengthController.text,
+      'weight': _weightController.text,
+      'notes': _notesController.text,
+      'vendor': _selectedVendor,
+      'materialType': _selectedMaterialType,
+      'basisWeight': _selectedBasisWeight,
+      'width': _selectedWidth,
+    });
     _rollIdController.dispose();
     _poController.dispose();
     _lengthController.dispose();
@@ -92,11 +123,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     super.dispose();
   }
 
+  // Bug #11 — advance with a short delay (so the just-completed field stays
+  // visible for a beat) and keep the new field on-screen via FieldFocus.
   void _focusAndOpenDropdown(FocusNode node, GlobalKey<DropdownSearchState<String>> key) {
-    node.requestFocus();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) key.currentState?.openDropDownSearch();
-    });
+    FieldFocus.advance(context, target: node, openDropdown: key);
   }
 
   Future<void> _loadMasters() async {
@@ -172,6 +202,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       if (_rollIdController.text.trim() == rollId) {
         setState(() => _rollIdError =
             'Roll ID already exists. Please scan a different roll or correct the value.');
+        // Bug #10 — keep focus ON the Roll ID field when a duplicate is
+        // detected so the operator can immediately edit or re-scan, instead
+        // of having auto-advance leave them stranded on Vendor.
+        _rollIdFocusNode.requestFocus();
       }
     } else {
       if (_rollIdController.text.trim() == rollId) {
@@ -240,6 +274,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   void _clearForm() {
+    // Bug #14 — explicit Clear (and post-submit reset) drops the cached
+    // snapshot so re-entering the screen starts blank.
+    FormStateCache.clear(_cacheKey);
     _rollIdController.clear();
     _poController.clear();
     _selectedWidth = null;
@@ -305,11 +342,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     hint: 'Auto-generated if empty',
                     focusNode: _rollIdFocusNode,
                     keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.next,
+                    // Bug #10 — `done` (not `next`) so Flutter's built-in
+                    // focus-advance can't race ahead of the duplicate check.
+                    textInputAction: TextInputAction.done,
                     onChanged: _onRollIdChanged,
                     errorText: _rollIdError,
-                    onSubmitted: (val) {
-                      _checkRollIdDuplicate(val.trim());
+                    onSubmitted: (val) async {
+                      // Bug #10 — wait for the duplicate check, then either
+                      // stay put (duplicate) or advance to Vendor.
+                      await _checkRollIdDuplicate(val.trim());
+                      if (!mounted) return;
+                      if (_rollIdError != null) {
+                        _rollIdFocusNode.requestFocus();
+                        return;
+                      }
                       _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
                     }),
                 const SizedBox(height: 14),
@@ -380,9 +426,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       dropdownKey: _widthDropdownKey,
                       onChanged: (v) {
                         setState(() => _selectedWidth = v);
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) _lengthFocusNode.requestFocus();
-                        });
+                        FieldFocus.advance(context, target: _lengthFocusNode);
                       },
                     ),
                   ),
@@ -393,7 +437,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         focusNode: _lengthFocusNode,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         textInputAction: TextInputAction.next,
-                        onSubmitted: (_) => _weightFocusNode.requestFocus()),
+                        onSubmitted: (_) => FieldFocus.advance(context, target: _weightFocusNode)),
                   ),
                 ]),
                 const SizedBox(height: 14),
@@ -404,7 +448,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     textInputAction: TextInputAction.done,
                     hint: 'Overall weight of the roll',
-                    onSubmitted: (_) => _submitFocusNode.requestFocus()),
+                    onSubmitted: (_) => FieldFocus.advance(context, target: _submitFocusNode)),
                 const SizedBox(height: 14),
 
                 _buildField('Notes', _notesController,
@@ -527,9 +571,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           FocusManager.instance.primaryFocus?.unfocus();
           if (val == null) { setState(() => _selectedVendor = null); return; }
           setState(() => _selectedVendor = val.split(' — ')[0]);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _poFocusNode.requestFocus();
-          });
+          FieldFocus.advance(context, target: _poFocusNode);
         },
       ),
     );

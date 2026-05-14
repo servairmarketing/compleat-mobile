@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/api_service.dart';
+import '../services/field_focus.dart';
 import 'forced_password_change_screen.dart';
 import 'home_screen.dart';
 
@@ -137,7 +138,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
                           ),
-                          onSubmitted: (_) => _passwordFocusNode.requestFocus(),
+                          // Bug #11 — consistent delayed auto-advance.
+                          onSubmitted: (_) =>
+                              FieldFocus.advance(context, target: _passwordFocusNode),
                         ),
                         const SizedBox(height: 16),
                         TextField(
@@ -168,7 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
                           ),
                           onSubmitted: (_) {
-                            _signInFocusNode.requestFocus();
+                            FieldFocus.advance(context, target: _signInFocusNode);
                             _login();
                           },
                         ),

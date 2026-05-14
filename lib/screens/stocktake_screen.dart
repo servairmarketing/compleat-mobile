@@ -4,6 +4,8 @@ import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/printer_service.dart';
+import '../services/form_state_cache.dart';
+import '../widgets/two_parent_scan_fields.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 
@@ -28,10 +30,26 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
   List<String> _widths = [];
   bool _loadingMasters = false;
 
+  // Bug #14 — in-memory cache key for the mode/sub-mode selection.
+  static const _cacheKey = 'stocktake';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore the mode/sub-mode the operator was last in.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _mode = snap['mode'];
+      _sub = snap['sub'];
+    }
     _loadMasters();
+  }
+
+  @override
+  void dispose() {
+    // Bug #14 — preserve mode/sub-mode across nav-away (in-memory only).
+    FormStateCache.write(_cacheKey, {'mode': _mode, 'sub': _sub});
+    super.dispose();
   }
 
   Future<void> _loadMasters() async {
@@ -415,9 +433,25 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   String? _rollIdError;
   String _lastCheckedRollId = '';
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_initial_parent';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _rollIdCtrl.text = snap['rollId'] ?? '';
+      _poCtrl.text = snap['po'] ?? '';
+      _lengthCtrl.text = snap['length'] ?? '';
+      _weightCtrl.text = snap['weight'] ?? '';
+      _notesCtrl.text = snap['notes'] ?? '';
+      _vendor = snap['vendor'];
+      _materialType = snap['materialType'];
+      _basisWeight = snap['basisWeight'];
+      _width = snap['width'];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
     });
@@ -442,6 +476,9 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       if (_rollIdCtrl.text.trim() == rollId) {
         setState(() => _rollIdError =
             'Roll ID already exists. Please scan a different roll or correct the value.');
+        // Bug #10 — keep focus ON the Roll ID field when a duplicate is
+        // detected so the operator can immediately edit or re-scan.
+        _rollIdFocus.requestFocus();
       }
     } else {
       if (_rollIdCtrl.text.trim() == rollId) {
@@ -459,6 +496,18 @@ class _InitialParentFormState extends State<_InitialParentForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'rollId': _rollIdCtrl.text,
+      'po': _poCtrl.text,
+      'length': _lengthCtrl.text,
+      'weight': _weightCtrl.text,
+      'notes': _notesCtrl.text,
+      'vendor': _vendor,
+      'materialType': _materialType,
+      'basisWeight': _basisWeight,
+      'width': _width,
+    });
     _rollIdCtrl.dispose(); _poCtrl.dispose();
     _lengthCtrl.dispose(); _weightCtrl.dispose();
     _notesCtrl.dispose(); _rollIdFocus.dispose();
@@ -684,9 +733,25 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   String? _message;
   bool _ok = false;
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_initial_child';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _parent1Ctrl.text = snap['parent1'] ?? '';
+      _parent2Ctrl.text = snap['parent2'] ?? '';
+      _qtyCtrl.text = snap['qty'] ?? '';
+      _lengthCtrl.text = snap['length'] ?? '';
+      _weightCtrl.text = snap['weight'] ?? '';
+      _notesCtrl.text = snap['notes'] ?? '';
+      _twoParent = snap['twoParent'] ?? false;
+      _productId = snap['productId'];
+      _productName = snap['productName'];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _parent1Focus.requestFocus();
     });
@@ -694,6 +759,18 @@ class _InitialChildFormState extends State<_InitialChildForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'parent1': _parent1Ctrl.text,
+      'parent2': _parent2Ctrl.text,
+      'qty': _qtyCtrl.text,
+      'length': _lengthCtrl.text,
+      'weight': _weightCtrl.text,
+      'notes': _notesCtrl.text,
+      'twoParent': _twoParent,
+      'productId': _productId,
+      'productName': _productName,
+    });
     _parent1Ctrl.dispose(); _parent2Ctrl.dispose();
     _qtyCtrl.dispose(); _lengthCtrl.dispose();
     _weightCtrl.dispose(); _notesCtrl.dispose();
@@ -927,9 +1004,26 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
   String? _vendor, _materialType, _basisWeight, _width;
   bool _submitting = false;
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_annual_parent';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress inline entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _showInlineForm = snap['showInlineForm'] ?? false;
+      _pendingRollId = snap['pendingRollId'] ?? '';
+      _poCtrl.text = snap['po'] ?? '';
+      _lengthCtrl.text = snap['length'] ?? '';
+      _weightCtrl.text = snap['weight'] ?? '';
+      _notesCtrl.text = snap['notes'] ?? '';
+      _vendor = snap['vendor'];
+      _materialType = snap['materialType'];
+      _basisWeight = snap['basisWeight'];
+      _width = snap['width'];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scanFocus.requestFocus();
     });
@@ -937,6 +1031,19 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'showInlineForm': _showInlineForm,
+      'pendingRollId': _pendingRollId,
+      'po': _poCtrl.text,
+      'length': _lengthCtrl.text,
+      'weight': _weightCtrl.text,
+      'notes': _notesCtrl.text,
+      'vendor': _vendor,
+      'materialType': _materialType,
+      'basisWeight': _basisWeight,
+      'width': _width,
+    });
     _scanCtrl.dispose(); _scanFocus.dispose();
     _poCtrl.dispose(); _lengthCtrl.dispose();
     _weightCtrl.dispose(); _notesCtrl.dispose();
@@ -1224,9 +1331,27 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
   final _notesCtrl = TextEditingController();
   bool _submitting = false;
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_annual_child';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress inline entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _twoParent = snap['twoParent'] ?? false;
+      _showInlineForm = snap['showInlineForm'] ?? false;
+      _pendingProductForForm = snap['pendingProductForForm'] ?? '';
+      if (snap['pendingParentsForForm'] is List) {
+        _pendingParentsForForm =
+            (snap['pendingParentsForForm'] as List).cast<String>();
+      }
+      _qtyCtrl.text = snap['qty'] ?? '';
+      _lengthCtrl.text = snap['length'] ?? '';
+      _weightCtrl.text = snap['weight'] ?? '';
+      _notesCtrl.text = snap['notes'] ?? '';
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scanFocus.requestFocus();
     });
@@ -1234,6 +1359,17 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'twoParent': _twoParent,
+      'showInlineForm': _showInlineForm,
+      'pendingProductForForm': _pendingProductForForm,
+      'pendingParentsForForm': List<String>.from(_pendingParentsForForm),
+      'qty': _qtyCtrl.text,
+      'length': _lengthCtrl.text,
+      'weight': _weightCtrl.text,
+      'notes': _notesCtrl.text,
+    });
     _scanCtrl.dispose(); _scanFocus.dispose();
     _qtyCtrl.dispose(); _lengthCtrl.dispose();
     _weightCtrl.dispose(); _notesCtrl.dispose();
@@ -1249,7 +1385,8 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
     return (productId: v.substring(0, i), parentId: v.substring(i + 1));
   }
 
-  Future<void> _processPair(String productId, List<String> parents) async {
+  Future<void> _processPair(String productId, List<String> parents,
+      {bool fromTwoParent = false}) async {
     setState(() { _busy = true; _message = null; });
     final pCsv = parents.join(',');
     final res = await ApiService.get('/stocktake/lookup_child?product_id=$productId&parent_roll_ids=$pCsv');
@@ -1272,7 +1409,9 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
           _ok = true; _busy = false;
         });
         _scanCtrl.clear();
-        _scanFocus.requestFocus();
+        // In two-parent mode the TwoParentScanFields widget owns + restores
+        // focus, so don't yank it back to the single scan field.
+        if (!fromTwoParent) _scanFocus.requestFocus();
       } else {
         setState(() {
           _message = scanRes['detail'] ?? 'Scan failed.';
@@ -1292,6 +1431,8 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
     }
   }
 
+  // Single-parent scan handler. Two-parent mode uses _onTwoParentPair via the
+  // shared TwoParentScanFields widget, so this only runs in single mode.
   Future<void> _onScan(String value) async {
     final parsed = _parseComposite(value);
     if (parsed == null) {
@@ -1299,40 +1440,33 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
       _scanCtrl.clear();
       return;
     }
-    if (!_twoParent) {
-      await _processPair(parsed.productId, [parsed.parentId]);
+    await _processPair(parsed.productId, [parsed.parentId]);
+  }
+
+  // Bug #15 — two-parent pair handler. Receives the two raw composite scans
+  // from the shared TwoParentScanFields widget.
+  Future<void> _onTwoParentPair(String scan1, String scan2) async {
+    final p1 = _parseComposite(scan1);
+    final p2 = _parseComposite(scan2);
+    if (p1 == null || p2 == null) {
+      setState(() { _message = 'Invalid composite — expected "ProductID-ParentID".'; _ok = false; });
       return;
     }
-    // Two-parent: pair the two scans
-    if (_pendingProductId == null) {
+    if (p1.productId != p2.productId) {
       setState(() {
-        _pendingProductId = parsed.productId;
-        _pendingParent1 = parsed.parentId;
-        _message = 'Scan #1 captured. Now scan the second parent label for this roll.';
-        _ok = true;
-      });
-      _scanCtrl.clear();
-      _scanFocus.requestFocus();
-      return;
-    }
-    if (parsed.productId != _pendingProductId) {
-      setState(() {
-        _message = 'Product ID mismatch on second scan — expected $_pendingProductId. Resetting.';
+        _message = 'Product ID mismatch between the two labels — both must be the same product.';
         _ok = false;
-        _pendingProductId = null;
-        _pendingParent1 = null;
       });
-      _scanCtrl.clear();
       return;
     }
-    final p1 = _pendingParent1!;
-    final p2 = parsed.parentId;
-    final productId = _pendingProductId!;
-    setState(() {
-      _pendingProductId = null;
-      _pendingParent1 = null;
-    });
-    await _processPair(productId, [p1, p2]);
+    if (p1.parentId == p2.parentId) {
+      setState(() {
+        _message = 'Both labels are from the same parent. Scan one label per parent.';
+        _ok = false;
+      });
+      return;
+    }
+    await _processPair(p1.productId, [p1.parentId, p2.parentId], fromTwoParent: true);
   }
 
   Future<void> _submitInline() async {
@@ -1404,22 +1538,32 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
               : 'Scan composite barcode (ProductID-ParentID).',
               style: const TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 8),
-          TextField(
-            key: const Key('stocktakeScanField'),
-            controller: _scanCtrl,
-            focusNode: _scanFocus,
-            autofocus: true,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            onSubmitted: _onScan,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-            decoration: const InputDecoration(
-              labelText: 'Composite Barcode',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
-              prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
+          // Bug #15 — two-parent mode shows TWO always-visible scan fields via
+          // the shared widget; single-parent keeps the one composite field.
+          if (_twoParent)
+            TwoParentScanFields(
+              key: const Key('stocktakeAnnualChildTwoParentScan'),
+              firstFieldFocusNode: _scanFocus,
+              enabled: !_busy,
+              onPair: _onTwoParentPair,
+            )
+          else
+            TextField(
+              key: const Key('stocktakeScanField'),
+              controller: _scanCtrl,
+              focusNode: _scanFocus,
+              autofocus: true,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              onSubmitted: _onScan,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+              decoration: const InputDecoration(
+                labelText: 'Composite Barcode',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+                prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
+              ),
             ),
-          ),
           const SizedBox(height: 8),
           if (_busy) const LinearProgressIndicator(),
           if (_pendingProductId != null) Padding(
@@ -1546,9 +1690,18 @@ class _PrintParentFormState extends State<_PrintParentForm> {
   String? _message;
   bool _ok = false;
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_print_parent';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _rollIdCtrl.text = snap['rollId'] ?? '';
+      _qtyCtrl.text = snap['qty'] ?? '1';
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
     });
@@ -1556,6 +1709,11 @@ class _PrintParentFormState extends State<_PrintParentForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'rollId': _rollIdCtrl.text,
+      'qty': _qtyCtrl.text,
+    });
     _rollIdCtrl.dispose(); _qtyCtrl.dispose();
     _rollIdFocus.dispose();
     super.dispose();
@@ -1643,9 +1801,22 @@ class _PrintChildFormState extends State<_PrintChildForm> {
   String? _message;
   bool _ok = false;
 
+  // Bug #14 — in-memory form-state cache key for this sub-form.
+  static const _cacheKey = 'stocktake_print_child';
+
   @override
   void initState() {
     super.initState();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _parent1Ctrl.text = snap['parent1'] ?? '';
+      _parent2Ctrl.text = snap['parent2'] ?? '';
+      _qtyCtrl.text = snap['qty'] ?? '1';
+      _twoParent = snap['twoParent'] ?? false;
+      _productId = snap['productId'];
+      _productName = snap['productName'];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _parent1Focus.requestFocus();
     });
@@ -1653,6 +1824,15 @@ class _PrintChildFormState extends State<_PrintChildForm> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    FormStateCache.write(_cacheKey, {
+      'parent1': _parent1Ctrl.text,
+      'parent2': _parent2Ctrl.text,
+      'qty': _qtyCtrl.text,
+      'twoParent': _twoParent,
+      'productId': _productId,
+      'productName': _productName,
+    });
     _parent1Ctrl.dispose(); _parent2Ctrl.dispose();
     _qtyCtrl.dispose(); _parent1Focus.dispose();
     super.dispose();

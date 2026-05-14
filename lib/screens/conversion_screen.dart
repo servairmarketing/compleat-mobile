@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
+import '../services/field_focus.dart';
+import '../services/form_state_cache.dart';
+import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
 class ConversionScreen extends StatefulWidget {
@@ -48,10 +51,24 @@ class _ConversionScreenState extends State<ConversionScreen> {
 
   final _scrollController = ScrollController();
 
+  // Bug #14 — in-memory form-state cache key for this screen.
+  static const _cacheKey = 'conversion';
+
   @override
   void initState() {
     super.initState();
     _loadProducts();
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _sourceTwoParent = snap['sourceTwoParent'] ?? false;
+      _sourceData = snap['sourceData'];
+      _sourceStatus = snap['sourceStatus'] ?? '';
+      _newProductId = snap['newProductId'];
+      _newProductName = snap['newProductName'];
+      _newRollsCount = snap['newRollsCount'] ?? 0;
+      _notesController.text = snap['notes'] ?? '';
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _sourceScanFocus.requestFocus();
     });
@@ -59,6 +76,17 @@ class _ConversionScreenState extends State<ConversionScreen> {
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry before disposing controllers.
+    // In-memory only — never persisted to disk.
+    FormStateCache.write(_cacheKey, {
+      'sourceTwoParent': _sourceTwoParent,
+      'sourceData': _sourceData,
+      'sourceStatus': _sourceStatus,
+      'newProductId': _newProductId,
+      'newProductName': _newProductName,
+      'newRollsCount': _newRollsCount,
+      'notes': _notesController.text,
+    });
     _sourceScanController.dispose();
     _sourceScanFocus.dispose();
     _newRollScanController.dispose();
@@ -103,62 +131,44 @@ class _ConversionScreenState extends State<ConversionScreen> {
   }
 
   // ── Source scan handler ──────────────────────────────────────────
+  // Single-parent source scan handler. Two-parent source uses
+  // _onSourceTwoParentPair via the shared TwoParentScanFields widget.
   Future<void> _handleSourceScan(String raw) async {
     if (raw.trim().isEmpty) return;
-    void resetScan() {
+    final p = _parseComposite(raw);
+    if (p == null) {
       _sourceScanController.clear();
       _pendingSourceFirstScan = null;
       if (mounted) _sourceScanFocus.requestFocus();
-    }
-
-    if (_sourceTwoParent) {
-      if (_pendingSourceFirstScan == null) {
-        final p = _parseComposite(raw);
-        if (p == null) {
-          resetScan();
-          _showMessage('Invalid composite barcode. Expected Product-Parent format.', false);
-          return;
-        }
-        setState(() => _pendingSourceFirstScan = raw.trim());
-        _sourceScanController.clear();
-        HapticFeedback.lightImpact();
-        if (mounted) _sourceScanFocus.requestFocus();
-        return;
-      }
-      final p1 = _parseComposite(_pendingSourceFirstScan!);
-      final p2 = _parseComposite(raw);
-      if (p1 == null || p2 == null) {
-        resetScan();
-        _showMessage('Invalid composite barcode. Expected Product-Parent format.', false);
-        return;
-      }
-      if (p1.productId != p2.productId) {
-        resetScan();
-        _showMessage('Both source labels must be from the same product roll.', false);
-        return;
-      }
-      if (p1.parentId == p2.parentId) {
-        // Keep label 1 pending; ask for the other parent.
-        _sourceScanController.clear();
-        _showMessage('Both labels are from the same parent. Scan the second parent\'s label.', false);
-        if (mounted) _sourceScanFocus.requestFocus();
-        return;
-      }
-      await _findSource(p1.productId, [p1.parentId, p2.parentId]);
-      return;
-    }
-
-    // Single-parent source
-    final p = _parseComposite(raw);
-    if (p == null) {
-      resetScan();
       _showMessage('Invalid composite barcode. Expected Product-Parent format.', false);
       return;
     }
     await _findSource(p.productId, [p.parentId]);
   }
 
-  Future<void> _findSource(String productId, List<String> parentIds) async {
+  // Bug #15 — two-parent source pair handler. Receives the two raw composite
+  // scans from the shared TwoParentScanFields widget; runs the same
+  // validation the old single-field state machine did.
+  Future<void> _onSourceTwoParentPair(String scan1, String scan2) async {
+    final p1 = _parseComposite(scan1);
+    final p2 = _parseComposite(scan2);
+    if (p1 == null || p2 == null) {
+      _showMessage('Invalid composite barcode. Expected Product-Parent format.', false);
+      return;
+    }
+    if (p1.productId != p2.productId) {
+      _showMessage('Both source labels must be from the same product roll.', false);
+      return;
+    }
+    if (p1.parentId == p2.parentId) {
+      _showMessage('Both labels are from the same parent. Scan one label per parent.', false);
+      return;
+    }
+    await _findSource(p1.productId, [p1.parentId, p2.parentId], fromTwoParent: true);
+  }
+
+  Future<void> _findSource(String productId, List<String> parentIds,
+      {bool fromTwoParent = false}) async {
     setState(() => _findingSource = true);
     final qs = parentIds.join(',');
     final res = await ApiService.get(
@@ -171,7 +181,8 @@ class _ConversionScreenState extends State<ConversionScreen> {
       _sourceScanController.clear();
       setState(() => _pendingSourceFirstScan = null);
       _showMessage('No in-stock source roll found for $productId from parent(s) ${parentIds.join(", ")}.', false);
-      if (mounted) _sourceScanFocus.requestFocus();
+      // In two-parent mode the TwoParentScanFields widget owns + restores focus.
+      if (mounted && !fromTwoParent) _sourceScanFocus.requestFocus();
       return;
     }
     setState(() {
@@ -180,9 +191,8 @@ class _ConversionScreenState extends State<ConversionScreen> {
     });
     _sourceScanController.clear();
     HapticFeedback.mediumImpact();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _newRollScanFocus.requestFocus();
-    });
+    // Bug #11 — brief delay before advancing to the new-roll scan field.
+    FieldFocus.advance(context, target: _newRollScanFocus);
   }
 
   void _resetSource() {
@@ -310,6 +320,15 @@ class _ConversionScreenState extends State<ConversionScreen> {
 
   // ── Submit ───────────────────────────────────────────────────────
   Future<void> _submitConversion() async {
+    // Bug #12 — if the operator typed a composite into the new-roll scan
+    // field without pressing Enter, treat it as a final scan attempt before
+    // validating. (The source scan field has no submit button — a scan IS
+    // its only action — so there is no unprocessed-text path there.)
+    if (_sourceData != null && _newRollScanController.text.trim().isNotEmpty) {
+      await _handleNewRollScan(_newRollScanController.text);
+      if (!mounted) return;
+    }
+
     final issues = <String>[];
     if (_sourceData == null) issues.add('Source roll must be identified first');
     if (_sourceStatus.isEmpty) issues.add('Source status must be Production or Finished');
@@ -489,22 +508,20 @@ class _ConversionScreenState extends State<ConversionScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          Builder(builder: (_) {
-            final String labelText;
-            final String hintText;
-            if (_sourceTwoParent) {
-              if (_pendingSourceFirstScan == null) {
-                labelText = 'Scan source label 1 of 2';
-                hintText = 'Scan first parent\'s composite label';
-              } else {
-                labelText = 'Scan source label 2 of 2';
-                hintText = 'Scan second parent\'s composite label';
-              }
-            } else {
-              labelText = 'Scan source composite barcode';
-              hintText = 'Scan here...';
-            }
-            return TextField(
+          // Bug #15 — two-parent source shows TWO always-visible scan fields
+          // via the shared widget; single-parent keeps the one composite
+          // field.
+          if (_sourceTwoParent)
+            TwoParentScanFields(
+              key: const Key('sourceTwoParentScan'),
+              firstFieldFocusNode: _sourceScanFocus,
+              enabled: !_findingSource,
+              onPair: _onSourceTwoParentPair,
+              field1Label: 'Scan source label 1 of 2',
+              field2Label: 'Scan source label 2 of 2',
+            )
+          else
+            TextField(
               key: const Key('sourceScanField'),
               controller: _sourceScanController,
               focusNode: _sourceScanFocus,
@@ -514,8 +531,8 @@ class _ConversionScreenState extends State<ConversionScreen> {
               style: const TextStyle(fontSize: 18),
               enabled: !_findingSource,
               decoration: InputDecoration(
-                labelText: labelText,
-                hintText: hintText,
+                labelText: 'Scan source composite barcode',
+                hintText: 'Scan here...',
                 border: const OutlineInputBorder(),
                 contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
                 prefixIcon: _findingSource
@@ -528,8 +545,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
               onChanged: (v) {
                 if (v.endsWith('\n') || v.length > 20) _handleSourceScan(v);
               },
-            );
-          }),
+            ),
         ] else ...[
           _sourceDetailsCard(),
           const SizedBox(height: 8),

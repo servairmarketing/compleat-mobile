@@ -6,6 +6,9 @@ import 'dart:convert';
 import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/printer_service.dart';
+import '../services/field_focus.dart';
+import '../services/form_state_cache.dart';
+import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
 class ProductionScreen extends StatefulWidget {
@@ -77,10 +80,40 @@ class _ProductionScreenState extends State<ProductionScreen>
   String? _message;
   bool _messageSuccess = false;
 
+  // Bug #14 — in-memory form-state cache key for this screen.
+  static const _cacheKey = 'production';
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    final snap = FormStateCache.read(_cacheKey);
+    if (snap != null) {
+      _lpParent1.text = snap['lpParent1'] ?? '';
+      _lpParent2.text = snap['lpParent2'] ?? '';
+      _lpTwoParent = snap['lpTwoParent'] ?? false;
+      _lpSelectedProduct = snap['lpSelectedProduct'];
+      _lpSelectedProductName = snap['lpSelectedProductName'];
+      _lpQtyController.text = snap['lpQty'] ?? '';
+      _lpParentRoll1Data = snap['lpParentRoll1Data'];
+      _lpParentRoll2Data = snap['lpParentRoll2Data'];
+      _rpParent1.text = snap['rpParent1'] ?? '';
+      _rpParent2.text = snap['rpParent2'] ?? '';
+      _rpTwoParent = snap['rpTwoParent'] ?? false;
+      _rpNotesController.text = snap['rpNotes'] ?? '';
+      _rpParentRoll1Data = snap['rpParentRoll1Data'];
+      _rpParentRoll2Data = snap['rpParentRoll2Data'];
+      if (snap['scannedItems'] is Map) {
+        _scannedItems = Map<String, Map<String, dynamic>>.from(
+            snap['scannedItems'] as Map);
+      }
+      _selectedStatus1 = snap['selectedStatus1'] ?? '';
+      _selectedStatus2 = snap['selectedStatus2'] ?? '';
+      _rpBatchMode = snap['rpBatchMode'];
+      _lastTabIndex = snap['tabIndex'] ?? 0;
+    }
+    _tabController =
+        TabController(length: 2, vsync: this, initialIndex: _lastTabIndex);
     _tabController.addListener(_handleTabChange);
     _loadProducts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -101,15 +134,37 @@ class _ProductionScreenState extends State<ProductionScreen>
     });
   }
 
+  // Bug #11 — advance with a short delay (keeps the just-completed field
+  // visible for a beat) via the shared FieldFocus helper.
   void _focusAndOpenLpProduct() {
-    _lpProductFocus.requestFocus();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _lpProductKey.currentState?.openDropDownSearch();
-    });
+    FieldFocus.advance(context, target: _lpProductFocus, openDropdown: _lpProductKey);
   }
 
   @override
   void dispose() {
+    // Bug #14 — snapshot current entry (both tabs) before disposing
+    // controllers. In-memory only — never persisted to disk.
+    FormStateCache.write(_cacheKey, {
+      'lpParent1': _lpParent1.text,
+      'lpParent2': _lpParent2.text,
+      'lpTwoParent': _lpTwoParent,
+      'lpSelectedProduct': _lpSelectedProduct,
+      'lpSelectedProductName': _lpSelectedProductName,
+      'lpQty': _lpQtyController.text,
+      'lpParentRoll1Data': _lpParentRoll1Data,
+      'lpParentRoll2Data': _lpParentRoll2Data,
+      'rpParent1': _rpParent1.text,
+      'rpParent2': _rpParent2.text,
+      'rpTwoParent': _rpTwoParent,
+      'rpNotes': _rpNotesController.text,
+      'rpParentRoll1Data': _rpParentRoll1Data,
+      'rpParentRoll2Data': _rpParentRoll2Data,
+      'scannedItems': _scannedItems,
+      'selectedStatus1': _selectedStatus1,
+      'selectedStatus2': _selectedStatus2,
+      'rpBatchMode': _rpBatchMode,
+      'tabIndex': _tabController.index,
+    });
     _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     _lpParent1.dispose(); _lpParent2.dispose();
@@ -457,7 +512,7 @@ class _ProductionScreenState extends State<ProductionScreen>
     return (productId: pid, parentId: parent);
   }
 
-  void _commitScan(String productId, String productName) {
+  void _commitScan(String productId, String productName, {bool refocusScan = true}) {
     setState(() {
       if (_scannedItems.containsKey(productId)) {
         _scannedItems[productId]!['count'] = (_scannedItems[productId]!['count'] as int) + 1;
@@ -470,62 +525,24 @@ class _ProductionScreenState extends State<ProductionScreen>
     });
     _rpScanController.clear();
     HapticFeedback.lightImpact();
-    if (mounted) _rpScanFocus.requestFocus();
+    // Bug #15 — in two-parent mode the TwoParentScanFields widget owns focus,
+    // so the caller passes refocusScan:false to avoid stealing it back.
+    if (refocusScan && mounted) _rpScanFocus.requestFocus();
   }
 
-  Future<void> _processScan(String value) async {
-    final raw = value.trim();
-    if (raw.isEmpty) return;
-
-    void rejectAndResetPending(String msg) {
-      _rpScanController.clear();
-      setState(() {
-        _rpFirstScanProduct = null;
-        _rpFirstScanParent = null;
-      });
-      _showMessage(msg, false);
-      if (mounted) _rpScanFocus.requestFocus();
-    }
-    void rejectKeepPending(String msg) {
-      _rpScanController.clear();
-      _showMessage(msg, false);
-      if (mounted) _rpScanFocus.requestFocus();
-    }
-
-    if (_rpParentRoll1Data == null) {
-      rejectAndResetPending('Please enter and confirm Parent Roll ID 1 before scanning.');
-      return;
-    }
-    if (_rpTwoParent && _rpParentRoll2Data == null) {
-      rejectAndResetPending('Please enter and confirm Parent Roll ID 2 before scanning.');
-      return;
-    }
-
-    // Cross-mode prevention: once a batch is locked to a mode, all further
-    // scans must use the same toggle state. Otherwise the batch can't fit in
-    // one production doc.
-    if (_rpBatchMode != null && _rpBatchMode != _rpTwoParent) {
-      rejectAndResetPending('This batch contains both single-parent and two-parent rolls. Submit them as separate batches.');
-      return;
-    }
-
-    final parsed = _parseComposite(raw);
-    if (parsed == null) {
-      rejectKeepPending('Invalid composite barcode. Expected Product-Parent format.');
-      return;
-    }
-    final parsedProductId = parsed.productId;
-    final parsedParentId = parsed.parentId;
-
+  // Shared product↔parent compatibility check used by both the single-parent
+  // (_processScan) and two-parent (_processTwoParentPair) flows. Returns the
+  // resolved product map on success, or null after showing the rejection
+  // message (and, for narrower widths, running the confirm dialog).
+  Future<Map<String, dynamic>?> _resolveAndValidateProduct(String parsedProductId) async {
     final product = _products.firstWhere(
       (p) => p['product_id']?.toString() == parsedProductId,
       orElse: () => {},
     );
     if (product.isEmpty) {
-      rejectAndResetPending('Product $parsedProductId not found in product master. Please check the barcode.');
-      return;
+      _showMessage('Product $parsedProductId not found in product master. Please check the barcode.', false);
+      return null;
     }
-
     final pMt = product['material_type']?.toString() ?? '';
     final pBw = product['basis_weight']?.toString() ?? '';
     final pW = double.tryParse(product['width']?.toString() ?? '') ?? 0.0;
@@ -538,78 +555,123 @@ class _ProductionScreenState extends State<ProductionScreen>
     final parentWs = <double>[w1, w2].where((w) => w > 0).toList();
 
     if (rMt.isNotEmpty && pMt.isNotEmpty && pMt != rMt) {
-      rejectAndResetPending('Material type mismatch: Parent roll is $rMt but scanned product $parsedProductId is $pMt. Scan rejected.');
-      return;
+      _showMessage('Material type mismatch: Parent roll is $rMt but scanned product $parsedProductId is $pMt. Scan rejected.', false);
+      return null;
     }
     if (rBw.isNotEmpty && pBw.isNotEmpty && pBw != rBw) {
-      rejectAndResetPending('Basis weight mismatch: Parent roll is $rBw lbs but scanned product $parsedProductId requires $pBw lbs. Scan rejected.');
-      return;
+      _showMessage('Basis weight mismatch: Parent roll is $rBw lbs but scanned product $parsedProductId requires $pBw lbs. Scan rejected.', false);
+      return null;
     }
     if (parentWs.isNotEmpty && pW > 0) {
       final minP = parentWs.reduce((a, b) => a < b ? a : b);
       final maxP = parentWs.reduce((a, b) => a > b ? a : b);
       if (pW > minP) {
-        rejectAndResetPending('Width mismatch: Scanned product $parsedProductId width ${pW}" exceeds parent roll width ${minP}". Scan rejected.');
-        return;
+        _showMessage('Width mismatch: Scanned product $parsedProductId width ${pW}" exceeds parent roll width ${minP}". Scan rejected.', false);
+        return null;
       }
       if (pW < maxP) {
         final ok = await _confirmNarrowerWidth(context, parentWs, pW, parsedProductId, isScan: true);
-        if (!ok) {
-          _rpScanController.clear();
-          if (mounted) _rpScanFocus.requestFocus();
-          return;
-        }
+        if (!ok) return null;
       }
     }
+    return Map<String, dynamic>.from(product);
+  }
 
-    final p1Id = _rpParent1.text.trim();
-    final p2Id = _rpParent2.text.trim();
-    final productName = product['product_name']?.toString() ?? parsedProductId;
+  // Single-parent scan handler. Two-parent mode uses _processTwoParentPair via
+  // the shared TwoParentScanFields widget, so this only runs in single mode.
+  Future<void> _processScan(String value) async {
+    final raw = value.trim();
+    if (raw.isEmpty) return;
 
-    if (!_rpTwoParent) {
-      // Single-parent mode: parsed parent must equal Parent Roll 1.
-      if (parsedParentId != p1Id) {
-        rejectAndResetPending('Scanned label is for parent $parsedParentId but Parent Roll 1 is $p1Id.');
-        return;
-      }
-      _commitScan(parsedProductId, productName);
+    void reject(String msg) {
+      _rpScanController.clear();
+      _showMessage(msg, false);
+      if (mounted) _rpScanFocus.requestFocus();
+    }
+
+    if (_rpParentRoll1Data == null) {
+      reject('Please enter and confirm Parent Roll ID 1 before scanning.');
+      return;
+    }
+    // Cross-mode prevention: a batch locked to two-parent can't take a
+    // single-parent scan.
+    if (_rpBatchMode == true) {
+      reject('This batch contains both single-parent and two-parent rolls. Submit them as separate batches.');
       return;
     }
 
-    // Two-parent mode.
-    if (_rpFirstScanProduct == null) {
-      // Label 1 of 2 — must match either parent.
-      if (parsedParentId != p1Id && parsedParentId != p2Id) {
-        rejectAndResetPending('Scanned label is for parent $parsedParentId but parents are $p1Id and $p2Id.');
-        return;
-      }
-      setState(() {
-        _rpFirstScanProduct = parsedProductId;
-        _rpFirstScanParent = parsedParentId;
-        _rpBatchMode = true;
-      });
+    final parsed = _parseComposite(raw);
+    if (parsed == null) {
+      reject('Invalid composite barcode. Expected Product-Parent format.');
+      return;
+    }
+
+    final product = await _resolveAndValidateProduct(parsed.productId);
+    if (!mounted) return;
+    if (product == null) {
       _rpScanController.clear();
-      HapticFeedback.lightImpact();
       if (mounted) _rpScanFocus.requestFocus();
       return;
     }
 
-    // Label 2 of 2 — must be the same product, the OTHER parent.
-    if (parsedProductId != _rpFirstScanProduct) {
-      rejectAndResetPending('Both labels must be from the same product roll.');
+    final p1Id = _rpParent1.text.trim();
+    if (parsed.parentId != p1Id) {
+      reject('Scanned label is for parent ${parsed.parentId} but Parent Roll 1 is $p1Id.');
       return;
     }
-    if (parsedParentId == _rpFirstScanParent) {
-      // Wrong parent — keep label 1 pending, ask operator to scan the other.
-      rejectKeepPending('Both labels are from the same parent. Scan the second parent\'s label.');
+    final productName = product['product_name']?.toString() ?? parsed.productId;
+    _commitScan(parsed.productId, productName);
+  }
+
+  // Bug #15 — two-parent scan handler. Receives the two raw composite scans
+  // from the shared TwoParentScanFields widget and runs the same validation
+  // the old single-field state machine did.
+  Future<void> _processTwoParentPair(String scan1, String scan2) async {
+    if (_rpParentRoll1Data == null) {
+      _showMessage('Please enter and confirm Parent Roll ID 1 before scanning.', false);
       return;
     }
-    if (parsedParentId != p1Id && parsedParentId != p2Id) {
-      rejectAndResetPending('Scanned label is for parent $parsedParentId but parents are $p1Id and $p2Id.');
+    if (_rpParentRoll2Data == null) {
+      _showMessage('Please enter and confirm Parent Roll ID 2 before scanning.', false);
       return;
     }
-    // Valid pair — counter +1 (one paired roll = one increment).
-    _commitScan(parsedProductId, productName);
+    // Cross-mode prevention: a batch locked to single-parent can't take a
+    // two-parent pair.
+    if (_rpBatchMode == false) {
+      _showMessage('This batch contains both single-parent and two-parent rolls. Submit them as separate batches.', false);
+      return;
+    }
+
+    final p1 = _parseComposite(scan1);
+    final p2 = _parseComposite(scan2);
+    if (p1 == null || p2 == null) {
+      _showMessage('Invalid composite barcode. Expected Product-Parent format.', false);
+      return;
+    }
+    if (p1.productId != p2.productId) {
+      _showMessage('Both labels must be from the same product roll.', false);
+      return;
+    }
+    if (p1.parentId == p2.parentId) {
+      _showMessage('Both labels are from the same parent. Scan one label per parent.', false);
+      return;
+    }
+    final p1Id = _rpParent1.text.trim();
+    final p2Id = _rpParent2.text.trim();
+    final scannedParents = {p1.parentId, p2.parentId};
+    if (!scannedParents.contains(p1Id) || !scannedParents.contains(p2Id)) {
+      _showMessage('Scanned labels are for parents ${p1.parentId} and ${p2.parentId} but parents are $p1Id and $p2Id.', false);
+      return;
+    }
+
+    final product = await _resolveAndValidateProduct(p1.productId);
+    if (!mounted) return;
+    if (product == null) return;
+
+    final productName = product['product_name']?.toString() ?? p1.productId;
+    setState(() => _rpBatchMode = true);
+    // Valid pair — one paired roll = one counter increment.
+    _commitScan(p1.productId, productName, refocusScan: false);
   }
 
   void _selectStatus(int parentSlot, String status) {
@@ -623,6 +685,15 @@ class _ProductionScreenState extends State<ProductionScreen>
   }
 
   Future<void> _submitProduction() async {
+    // Bug #12 — if the operator typed a composite into the (single-parent)
+    // scan field without pressing Enter, treat it as a final scan attempt
+    // before validating. Two-parent pairs require both labels, so a lone
+    // half-scan in TwoParentScanFields is not a completable scan to drain.
+    if (!_rpTwoParent && _rpScanController.text.trim().isNotEmpty) {
+      await _processScan(_rpScanController.text);
+      if (!mounted) return;
+    }
+
     final p1 = _rpParent1.text.trim();
     final p2 = _rpParent2.text.trim();
 
@@ -787,7 +858,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                 if (!mounted) return;
                 if (!ok) { _lpParent1Focus.requestFocus(); return; }
                 if (_lpTwoParent) {
-                  _lpParent2Focus.requestFocus();
+                  FieldFocus.advance(context, target: _lpParent2Focus);
                 } else {
                   _focusAndOpenLpProduct();
                 }
@@ -921,9 +992,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                 }
               }
               if (mounted && _lpSelectedProduct != null) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) _lpQtyFocus.requestFocus();
-                });
+                FieldFocus.advance(context, target: _lpQtyFocus);
               }
             },
           ),
@@ -934,7 +1003,7 @@ class _ProductionScreenState extends State<ProductionScreen>
               focusNode: _lpQtyFocus,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _lpPrintFocus.requestFocus()),
+              onSubmitted: (_) => FieldFocus.advance(context, target: _lpPrintFocus)),
           const SizedBox(height: 20),
           Row(children: [
             Expanded(
@@ -1028,9 +1097,9 @@ class _ProductionScreenState extends State<ProductionScreen>
                 if (!mounted) return;
                 if (!ok) { _rpParent1Focus.requestFocus(); return; }
                 if (_rpTwoParent) {
-                  _rpParent2Focus.requestFocus();
+                  FieldFocus.advance(context, target: _rpParent2Focus);
                 } else {
-                  _rpScanFocus.requestFocus();
+                  FieldFocus.advance(context, target: _rpScanFocus);
                 }
               }),
           if (_rpParentRoll1Data != null)
@@ -1058,7 +1127,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                   final ok = await _validateRpParent2();
                   if (!mounted) return;
                   if (!ok) { _rpParent2Focus.requestFocus(); return; }
-                  _rpScanFocus.requestFocus();
+                  FieldFocus.advance(context, target: _rpScanFocus);
                 }),
             if (_rpParentRoll2Data != null)
               Container(
@@ -1102,22 +1171,13 @@ class _ProductionScreenState extends State<ProductionScreen>
           ),
           const SizedBox(height: 12),
 
-          // Mode badge (always visible) — orange in two-parent mode showing
-          // which scan is expected next (and, after label 1, which parent is
-          // expected for label 2).
+          // Mode badge (always visible).
           Builder(builder: (_) {
-            final p1Id = _rpParent1.text.trim();
-            final p2Id = _rpParent2.text.trim();
             final String badgeText;
             final Color badgeBg;
             final Color badgeFg;
             if (_rpTwoParent) {
-              if (_rpFirstScanProduct == null) {
-                badgeText = 'Two-parent mode — scan label 1 of 2';
-              } else {
-                final otherParent = _rpFirstScanParent == p1Id ? p2Id : p1Id;
-                badgeText = 'Two-parent mode — scan label 2 of 2 (parent $otherParent)';
-              }
+              badgeText = 'Two-parent mode — scan one label per parent into the two fields below';
               badgeBg = Colors.orange[100]!;
               badgeFg = Colors.orange[900]!;
             } else {
@@ -1138,26 +1198,18 @@ class _ProductionScreenState extends State<ProductionScreen>
             );
           }),
 
-          // Scan field — labelText/hintText reflect mode and pending state.
-          Builder(builder: (_) {
-            final p1Id = _rpParent1.text.trim();
-            final p2Id = _rpParent2.text.trim();
-            final String labelText;
-            final String hintText;
-            if (_rpTwoParent) {
-              if (_rpFirstScanProduct == null) {
-                labelText = 'Scan label 1 of 2';
-                hintText = 'Scan first parent\'s composite label';
-              } else {
-                final otherParent = _rpFirstScanParent == p1Id ? p2Id : p1Id;
-                labelText = 'Scan label 2 of 2 (parent $otherParent)';
-                hintText = 'Scan composite label for parent $otherParent';
-              }
-            } else {
-              labelText = 'Scan composite barcode';
-              hintText = 'Scan here...';
-            }
-            return TextField(
+          // Scan field(s). Bug #15 — two-parent mode shows TWO always-visible
+          // scan fields via the shared TwoParentScanFields widget so the
+          // operator can see both labels; single-parent mode keeps the single
+          // composite-barcode field.
+          if (_rpTwoParent)
+            TwoParentScanFields(
+              key: const Key('rpTwoParentScan'),
+              firstFieldFocusNode: _rpScanFocus,
+              onPair: _processTwoParentPair,
+            )
+          else
+            TextField(
               key: const Key('scanField'),
               controller: _rpScanController,
               focusNode: _rpScanFocus,
@@ -1165,19 +1217,18 @@ class _ProductionScreenState extends State<ProductionScreen>
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.done,
               style: const TextStyle(fontSize: 18),
-              decoration: InputDecoration(
-                labelText: labelText,
-                hintText: hintText,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
-                prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
+              decoration: const InputDecoration(
+                labelText: 'Scan composite barcode',
+                hintText: 'Scan here...',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+                prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
               ),
               onSubmitted: (v) { _processScan(v); _rpScanFocus.requestFocus(); },
               onChanged: (v) {
                 if (v.endsWith('\n') || v.length > 20) _processScan(v);
               },
-            );
-          }),
+            ),
           const SizedBox(height: 12),
 
           // Scanned items list
