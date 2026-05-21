@@ -284,7 +284,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       return false;
     }
     final status = data['status']?.toString() ?? '';
-    if (status == 'consumed' || status == 'finished') {
+    if (status == 'consumed') {
       _lpParent1.clear();
       setState(() => _lpParentRoll1Data = null);
       _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
@@ -324,7 +324,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       return false;
     }
     final status = data['status']?.toString() ?? '';
-    if (status == 'consumed' || status == 'finished') {
+    if (status == 'consumed') {
       _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
       _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
@@ -369,7 +369,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       return false;
     }
     final status = data['status']?.toString() ?? '';
-    if (status == 'consumed' || status == 'finished') {
+    if (status == 'consumed') {
       _rpParent1.clear();
       setState(() => _rpParentRoll1Data = null);
       _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
@@ -412,7 +412,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       return false;
     }
     final status = data['status']?.toString() ?? '';
-    if (status == 'consumed' || status == 'finished') {
+    if (status == 'consumed') {
       _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
       _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
@@ -727,13 +727,13 @@ class _ProductionScreenState extends State<ProductionScreen>
       issues.add('Finish the second scan of the pending splice roll before submitting');
     }
     // A parent used in production has been at least partially consumed — it
-    // can't stay "in_stock". Force operator to pick Production or Finished
+    // can't stay "in_stock". Force operator to pick In Production or Consumed
     // for each parent in scope.
     if (_selectedStatus1.isEmpty) {
-      issues.add('Status for parent roll 1 must be Production or Finished');
+      issues.add('Status for parent roll 1 must be In Production or Consumed');
     }
     if (batchTwoParent && _selectedStatus2.isEmpty) {
-      issues.add('Status for parent roll 2 must be Production or Finished');
+      issues.add('Status for parent roll 2 must be In Production or Consumed');
     }
     if (issues.isNotEmpty) {
       await showValidationDialog(context, issues);
@@ -1309,7 +1309,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             const SizedBox(height: 8),
           ],
 
-          // Parent roll status — Production or Finished only. A parent used
+          // Parent roll status — In Production or Consumed only. A parent used
           // in production cannot remain "in_stock", so that option is gone.
           // Each parent in scope needs its own explicit selection.
           // Bug #21 — in two-parent mode each status block names its actual
@@ -1322,9 +1322,9 @@ class _ProductionScreenState extends State<ProductionScreen>
           ),
           const SizedBox(height: 8),
           Row(children: [
-            _statusButton(1, 'production', '🟡 Production', Colors.orange[700]!),
+            _statusButton(1, 'in_production', '🟡 In Production', Colors.orange[700]!),
             const SizedBox(width: 8),
-            _statusButton(1, 'finished', '🔴 Finished', Colors.red[700]!),
+            _statusButton(1, 'consumed', '🔴 Consumed', Colors.red[700]!),
           ]),
           if (_rpBatchMode ?? _rpTwoParent) ...[
             const SizedBox(height: 12),
@@ -1334,9 +1334,9 @@ class _ProductionScreenState extends State<ProductionScreen>
             ),
             const SizedBox(height: 8),
             Row(children: [
-              _statusButton(2, 'production', '🟡 Production', Colors.orange[700]!),
+              _statusButton(2, 'in_production', '🟡 In Production', Colors.orange[700]!),
               const SizedBox(width: 8),
-              _statusButton(2, 'finished', '🔴 Finished', Colors.red[700]!),
+              _statusButton(2, 'consumed', '🔴 Consumed', Colors.red[700]!),
             ]),
           ],
           const SizedBox(height: 12),

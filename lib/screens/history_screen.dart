@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/roll_status.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -423,7 +424,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          status.toUpperCase(),
+                          rollStatusLabel(status).toUpperCase(),
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -583,6 +584,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     switch (status) {
       case 'in_stock':
         return (Colors.green.shade100, Colors.green.shade800);
+      case 'in_production':
+        return (Colors.orange.shade100, Colors.orange.shade800);
+      case 'consumed':
       case 'sold':
         return (Colors.red.shade100, Colors.red.shade800);
       case 'converted':
@@ -626,8 +630,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
             '—';
         final qty = c['quantity']?.toString() ?? '—';
         final statusAfter = c['source_status_after']?.toString() ?? '';
-        final badgeColors = statusAfter == 'finished'
-            ? (Colors.red.shade100, Colors.red.shade800)
+        final badgeColors = statusAfter == 'converted'
+            ? (Colors.blue.shade100, Colors.blue.shade800)
             : (Colors.orange.shade100, Colors.orange.shade800);
 
         return Card(
@@ -668,7 +672,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          'SOURCE ${statusAfter.toUpperCase()}',
+                          'SOURCE ${rollStatusLabel(statusAfter).toUpperCase()}',
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -915,7 +919,8 @@ class _ProductionDetailScreen extends StatelessWidget {
             _readField('Quantity', roll['quantity']?.toString()),
             _readField(
                 'Parent Roll(s)', parentList.isEmpty ? '—' : parentList.join('\n')),
-            _readField('Status', roll['status']?.toString()),
+            _readField('Status',
+                roll['status'] != null ? rollStatusLabel(roll['status'].toString()) : null),
             _readField('Notes', roll['notes']?.toString()),
             _readField('Produced By', roll['created_by']?.toString()),
             _readField('Date/Time', createdAtStr),
@@ -1161,7 +1166,10 @@ class _ConversionDetailScreen extends StatelessWidget {
             _readField('Source Length', sourceProduct['length']?.toString()),
             _readField('Source Parent(s)',
                 sourceParents.isEmpty ? '—' : sourceParents.join('\n')),
-            _readField('Source Status After', conv['source_status_after']?.toString()),
+            _readField('Source Status After',
+                conv['source_status_after'] != null
+                    ? rollStatusLabel(conv['source_status_after'].toString())
+                    : null),
             const SizedBox(height: 8),
             const Text('METADATA',
                 style: TextStyle(color: Colors.black54, fontSize: 12,

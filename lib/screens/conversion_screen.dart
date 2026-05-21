@@ -28,7 +28,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
   bool _findingSource = false;
   Map<String, dynamic>? _sourceData;
 
-  // ── Source status (Production or Finished — never In Stock) ──────
+  // ── Source status (In Production or Converted — never In Stock) ──
   String _sourceStatus = '';
 
   // ── New rolls being produced ─────────────────────────────────────
@@ -332,7 +332,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
 
     final issues = <String>[];
     if (_sourceData == null) issues.add('Source roll must be identified first');
-    if (_sourceStatus.isEmpty) issues.add('Source status must be Production or Finished');
+    if (_sourceStatus.isEmpty) issues.add('Source status must be In Production or Converted');
     if (_newProductId == null || _newRollsCount < 1) {
       issues.add('At least one new roll must be scanned');
     }
@@ -644,14 +644,14 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
                 letterSpacing: 1.2, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Row(children: [
-          _statusButton('production', '🟡 Production', Colors.orange[700]!),
+          _statusButton('in_production', '🟡 In Production', Colors.orange[700]!),
           const SizedBox(width: 8),
-          _statusButton('finished', '🔴 Finished', Colors.red[700]!),
+          _statusButton('converted', '🔵 Converted', Colors.blue[700]!),
         ]),
         const SizedBox(height: 4),
         Text(
           (_sourceData?['quantity'] is num && (_sourceData!['quantity'] as num).toInt() <= 1)
-              ? 'Source quantity will reach 0 — status will be set to Finished automatically.'
+              ? 'Source quantity will reach 0 — status will be set to Converted automatically.'
               : 'A source used in production cannot remain in stock.',
           style: const TextStyle(fontSize: 12, color: Colors.black54),
         ),

@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/local_db.dart';
 import '../services/printer_service.dart';
 import '../services/form_state_cache.dart';
+import '../services/roll_status.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
@@ -389,12 +390,7 @@ Widget _stSimpleDropdown({
 // Initial Stock Entry lets the operator record already-consumed legacy
 // inventory by choosing its status. Annual stock-take modes never set
 // status (they reconcile physical scans), so they don't use this.
-const Map<String, String> _statusLabels = {
-  'in_stock': 'In Stock',
-  'production': 'Production',
-  'finished': 'Finished',
-  'sold': 'Sold',
-};
+// Labels come from the shared rollStatusLabels map (services/roll_status.dart).
 
 Widget _stStatusDropdown({
   required List<String> allowedValues,
@@ -404,12 +400,12 @@ Widget _stStatusDropdown({
   return _stSimpleDropdown(
     widgetKey: const Key('stocktakeStatusDropdown'),
     label: 'Status *',
-    items: [for (final v in allowedValues) _statusLabels[v]!],
-    value: _statusLabels[value],
+    items: [for (final v in allowedValues) rollStatusLabel(v)],
+    value: rollStatusLabel(value),
     onChanged: (label) {
       if (label == null) return;
       for (final v in allowedValues) {
-        if (_statusLabels[v] == label) { onChanged(v); return; }
+        if (rollStatusLabel(v) == label) { onChanged(v); return; }
       }
     },
   );
@@ -721,7 +717,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stStatusDropdown(
-              allowedValues: const ['in_stock', 'production', 'finished'],
+              allowedValues: const ['in_stock', 'in_production', 'consumed'],
               value: _status,
               onChanged: (v) => setState(() => _status = v),
             ),
@@ -1003,7 +999,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stStatusDropdown(
-              allowedValues: const ['in_stock', 'production', 'finished', 'sold'],
+              allowedValues: const ['in_stock', 'in_production', 'converted', 'sold'],
               value: _status,
               onChanged: (v) => setState(() => _status = v),
             ),
