@@ -55,6 +55,10 @@ class _ProductionScreenState extends State<ProductionScreen>
   // pending label-1 scan so subsequent scans in a different toggle state are
   // blocked (the batch can't mix single-parent and splice rolls in one doc).
   bool? _rpBatchMode;
+  // Bug #24 — true while TwoParentScanFields holds a half-finished splice
+  // scan (label 1 in, label 2 not yet scanned). Lets submit validation tell
+  // a pending splice apart from "nothing scanned".
+  bool _rpTwoParentPending = false;
   // Per-parent status. "In Stock" is no longer selectable on Roll Production
   // — a parent that's been used in production has been at least partially
   // consumed, so it can never logically remain in_stock.
@@ -712,7 +716,13 @@ class _ProductionScreenState extends State<ProductionScreen>
     final issues = <String>[];
     if (p1.isEmpty) issues.add('Parent Roll ID is required');
     if (batchTwoParent && p2.isEmpty) issues.add('Second Parent Roll ID is required');
-    if (_scannedItems.isEmpty) issues.add('At least one child roll must be scanned');
+    // Bug #24 — a half-finished splice scan (label 1 in, label 2 still
+    // pending) is a distinct state from having scanned nothing at all.
+    if (_rpTwoParent && _rpTwoParentPending) {
+      issues.add('Pending splice scan — scan label 2 of 2 to complete the pair, or clear the pending scan.');
+    } else if (_scannedItems.isEmpty) {
+      issues.add('At least one child roll must be scanned');
+    }
     if (_rpFirstScanProduct != null) {
       issues.add('Finish the second scan of the pending splice roll before submitting');
     }
@@ -772,6 +782,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       _rpFirstScanProduct = null;
       _rpFirstScanParent = null;
       _rpBatchMode = null;
+      _rpTwoParentPending = false;
     });
     setState(() { _rpParentRoll1Data = null; _rpParentRoll2Data = null; });
     FocusScope.of(context).unfocus();
@@ -1099,6 +1110,8 @@ class _ProductionScreenState extends State<ProductionScreen>
                   // next scan starts fresh in the new mode.
                   _rpFirstScanProduct = null;
                   _rpFirstScanParent = null;
+                  // Bug #24 — the splice scan widget is rebuilt on the flip.
+                  _rpTwoParentPending = false;
                   // Note: do NOT clear _rpParent2 — keep parent 2 populated
                   // so flipping back to two-parent mode mid-batch keeps it.
                 });
@@ -1234,6 +1247,8 @@ class _ProductionScreenState extends State<ProductionScreen>
               // Bug #22 — don't steal focus to the scan field on mount; the
               // toggle handler keeps focus on Parent Roll 1.
               autofocusOnMount: false,
+              // Bug #24 — track the half-finished splice-scan state.
+              onPendingChanged: (p) => _rpTwoParentPending = p,
               onPair: _processTwoParentPair,
             )
           else

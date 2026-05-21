@@ -30,6 +30,9 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
 
   // Two-parent toggle
   bool _twoParent = false;
+  // Bug #24 — true while TwoParentScanFields holds a half-finished splice
+  // scan (label 1 in, label 2 not yet scanned).
+  bool _twoParentPending = false;
 
   // Scan
   final _scanController = TextEditingController();
@@ -286,7 +289,12 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     if (_company == null) issues.add('Company is required');
     if (_selectedCustomer == null) issues.add('Customer is required');
     if (_invoiceController.text.trim().isEmpty) issues.add('Invoice Number is required');
-    if (_lines.isEmpty) issues.add('At least one roll must be scanned');
+    // Bug #24 — distinguish a half-finished splice scan from no scans.
+    if (_twoParent && _twoParentPending) {
+      issues.add('Pending splice scan — scan label 2 of 2 to complete the pair, or clear the pending scan.');
+    } else if (_lines.isEmpty) {
+      issues.add('At least one roll must be scanned');
+    }
     if (issues.isNotEmpty) {
       await showValidationDialog(context, issues);
       return;
@@ -325,6 +333,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
       _twoParent = false;
       _scanController.clear();
       _pendingFirstScan = null;
+      _twoParentPending = false;
       _lines.clear();
       _notesController.clear();
     });
@@ -507,6 +516,8 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                           _twoParent = v;
                           _pendingFirstScan = null;
                           _scanController.clear();
+                          // Bug #24 — splice scan widget rebuilt on the flip.
+                          _twoParentPending = false;
                         });
                         // Bug #22 — after the mode flip, focus the scan
                         // field (the next input) so single↔two-parent
@@ -528,6 +539,8 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                       key: const Key('salesTwoParentScan'),
                       firstFieldFocusNode: _scanFocus,
                       enabled: !_checkingStock,
+                      // Bug #24 — track the half-finished splice-scan state.
+                      onPendingChanged: (p) => _twoParentPending = p,
                       onPair: _onTwoParentPair,
                     )
                   else

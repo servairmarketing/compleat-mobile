@@ -35,6 +35,11 @@ class TwoParentScanFields extends StatefulWidget {
   /// the host screen then drives focus itself.
   final bool autofocusOnMount;
 
+  /// Bug #24 — fires when the half-finished-splice state changes (label 1
+  /// entered but the pair not yet committed). Lets the host screen tell a
+  /// pending splice apart from "nothing scanned" when validating a submit.
+  final ValueChanged<bool>? onPendingChanged;
+
   final String field1Label;
   final String field2Label;
   final String field1Hint;
@@ -46,6 +51,7 @@ class TwoParentScanFields extends StatefulWidget {
     this.enabled = true,
     this.firstFieldFocusNode,
     this.autofocusOnMount = true,
+    this.onPendingChanged,
     this.field1Label = 'Scan label 1 of 2',
     this.field2Label = 'Scan label 2 of 2',
     this.field1Hint = "Scan first parent's label",
@@ -65,6 +71,17 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
   late final FocusNode _f1;
   late final bool _ownsF1;
   bool _processing = false;
+  // Bug #24 — last reported half-scan state (label 1 entered, pair not yet
+  // committed), so onPendingChanged only fires on an actual transition.
+  bool _pending = false;
+
+  void _notifyPending() {
+    final p = _c1.text.trim().isNotEmpty;
+    if (p != _pending) {
+      _pending = p;
+      widget.onPendingChanged?.call(p);
+    }
+  }
 
   @override
   void initState() {
@@ -112,6 +129,7 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
         _c2.clear();
         setState(() => _processing = false);
         _f1.requestFocus();
+        _notifyPending();
       }
     }
   }
@@ -149,6 +167,8 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
         final fired = v.contains('\n') || v.contains('\r');
         debugScan('twoParentScan', v, fired);
         if (fired) onDone();
+        // Bug #24 — keep the host informed of the half-scan state.
+        _notifyPending();
       },
     );
   }
