@@ -21,9 +21,21 @@ class FieldFocus {
   /// short enough not to slow a fast operator.
   static const Duration advanceDelay = Duration(milliseconds: 250);
 
+  /// Bug #30 — viewport alignment for a field that is about to show a
+  /// dropdown. 0.2 places the field ~20% from the top so the popup (capped at
+  /// 40% of viewport height) has room to open BELOW it, even with the keyboard
+  /// occupying the lower part of the screen. Previously 0.5 (mid-viewport),
+  /// which left no room below once the keyboard was up and the popup opened
+  /// upward over earlier fields.
+  static const double dropdownFieldAlignment = 0.2;
+
+  static const Duration _scrollDuration = Duration(milliseconds: 200);
+
   /// Move focus to [target] after [advanceDelay]. Optionally open a
-  /// DropdownSearch popup ([openDropdown]) once focused, and scroll so the
-  /// target — and the field just above it — stay visible.
+  /// DropdownSearch popup ([openDropdown]) once focused. The target field is
+  /// scrolled to [dropdownFieldAlignment] FIRST; the dropdown is opened only
+  /// after that scroll settles, so the popup anchors at the field's new
+  /// (higher) position and opens downward.
   static void advance(
     BuildContext context, {
     required FocusNode target,
@@ -32,24 +44,40 @@ class FieldFocus {
     Future.delayed(advanceDelay, () {
       if (!context.mounted) return;
       target.requestFocus();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!context.mounted) return;
-        openDropdown?.currentState?.openDropDownSearch();
         final tctx = target.context;
         if (tctx != null) {
-          // Bug #18 — alignment 0.5 sits the new field at mid-viewport, so
-          // its auto-opened dropdown (which renders below it, capped at ~40%
-          // of viewport height — see each DropdownSearch's constraints) fills
-          // the lower half and the previously-completed field's VALUE stays
-          // visible in the upper half.
-          Scrollable.ensureVisible(
+          await Scrollable.ensureVisible(
             tctx,
-            alignment: 0.5,
-            duration: const Duration(milliseconds: 200),
+            alignment: dropdownFieldAlignment,
+            duration: _scrollDuration,
             curve: Curves.easeOut,
           );
         }
+        if (!context.mounted) return;
+        // Open AFTER the scroll completes. DropdownSearch.onBeforePopupOpening
+        // (see ensureRoomForDropdown) also re-checks room as a safety net for
+        // dropdowns opened by a direct tap rather than through advance().
+        openDropdown?.currentState?.openDropDownSearch();
       });
     });
+  }
+
+  /// Bug #30 — wired into every DropdownSearch via
+  /// `DropdownSearch.onBeforePopupOpening`. Scrolls the dropdown's own field
+  /// ([context]) to [dropdownFieldAlignment] BEFORE the popup is positioned,
+  /// so it always opens BELOW the field, never upward over earlier fields.
+  /// Always returns true so the popup still opens.
+  static Future<bool> ensureRoomForDropdown(BuildContext? context) async {
+    if (context != null && context.mounted) {
+      await Scrollable.ensureVisible(
+        context,
+        alignment: dropdownFieldAlignment,
+        duration: _scrollDuration,
+        curve: Curves.easeOut,
+      );
+    }
+    return true;
   }
 }

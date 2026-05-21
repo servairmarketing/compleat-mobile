@@ -6,6 +6,7 @@ import '../services/local_db.dart';
 import '../services/printer_service.dart';
 import '../services/form_state_cache.dart';
 import '../services/roll_status.dart';
+import '../services/field_focus.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
@@ -356,8 +357,10 @@ Widget _stSimpleDropdown({
   bool enabled = true,
   Key? widgetKey,
 }) {
-  return DropdownSearch<String>(
+  return Builder(builder: (ctx) => DropdownSearch<String>(
     key: widgetKey,
+    // Bug #30 — scroll the field up so the popup opens below it.
+    onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
     enabled: enabled,
     items: items,
     selectedItem: value,
@@ -386,7 +389,7 @@ Widget _stSimpleDropdown({
       FocusManager.instance.primaryFocus?.unfocus();
       onChanged(v);
     },
-  );
+  ));
 }
 
 // ─── Bug #20 — operator-selectable initial status ───────────────────
@@ -641,8 +644,10 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 errorText: _rollIdError,
                 onSubmitted: (val) => _checkRollIdDuplicate(val.trim())),
             const SizedBox(height: 14),
-            DropdownSearch<String>(
+            Builder(builder: (ctx) => DropdownSearch<String>(
               key: const Key('stocktakeVendorDropdown'),
+              // Bug #30 — scroll the field up so the popup opens below it.
+              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
               items: vendorItems,
               selectedItem: selectedVendor,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -661,7 +666,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 if (val == null) { setState(() => _vendor = null); return; }
                 setState(() => _vendor = val.split(' — ')[0]);
               },
-            ),
+            )),
             const SizedBox(height: 14),
             _stField('PO Number', _poCtrl,
                 widgetKey: const Key('stocktakePoNumberField'),
@@ -957,8 +962,10 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                   textInputAction: TextInputAction.next),
             ],
             const SizedBox(height: 14),
-            DropdownSearch<String>(
+            Builder(builder: (ctx) => DropdownSearch<String>(
               key: const Key('stocktakeProductDropdown'),
+              // Bug #30 — scroll the field up so the popup opens below it.
+              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
               items: productItems,
               selectedItem: (selectedProduct?.isEmpty ?? true) ? null : selectedProduct,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -984,7 +991,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                   _productName = parts.length > 1 ? parts[1] : parts[0];
                 });
               },
-            ),
+            )),
             const SizedBox(height: 14),
             Row(children: [
               Expanded(
@@ -1254,7 +1261,9 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
             const SizedBox(height: 14),
-            DropdownSearch<String>(
+            Builder(builder: (ctx) => DropdownSearch<String>(
+              // Bug #30 — scroll the field up so the popup opens below it.
+              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
               items: vendorItems,
               selectedItem: selectedVendor,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -1273,7 +1282,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
                 if (val == null) { setState(() => _vendor = null); return; }
                 setState(() => _vendor = val.split(' — ')[0]);
               },
-            ),
+            )),
             const SizedBox(height: 14),
             _stField('PO Number', _poCtrl),
             const SizedBox(height: 14),
@@ -1992,8 +2001,10 @@ class _PrintChildFormState extends State<_PrintChildForm> {
                   textInputAction: TextInputAction.next),
             ],
             const SizedBox(height: 14),
-            DropdownSearch<String>(
+            Builder(builder: (ctx) => DropdownSearch<String>(
               key: const Key('stocktakeProductDropdown'),
+              // Bug #30 — scroll the field up so the popup opens below it.
+              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
               items: productItems,
               selectedItem: (selectedProduct?.isEmpty ?? true) ? null : selectedProduct,
               dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -2019,7 +2030,7 @@ class _PrintChildFormState extends State<_PrintChildForm> {
                   _productName = parts.length > 1 ? parts[1] : parts[0];
                 });
               },
-            ),
+            )),
             const SizedBox(height: 14),
             _stField('Quantity *', _qtyCtrl,
                 widgetKey: const Key('stocktakeQtyField'),

@@ -415,6 +415,9 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                       opacity: _company == null ? 0.5 : 1.0,
                       child: DropdownSearch<Map<String, dynamic>>(
                         key: _customerKey,
+                        // Bug #30 — scroll the field up so the popup opens below it.
+                        onBeforePopupOpening: (_) =>
+                            FieldFocus.ensureRoomForDropdown(_customerKey.currentContext),
                         items: customers,
                         selectedItem: _selectedCustomer,
                         itemAsString: (c) => (c['display_name'] ?? '').toString(),

@@ -538,6 +538,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       focusNode: _vendorFocusNode,
       child: DropdownSearch<String>(
         key: _vendorDropdownKey,
+        // Bug #30 — scroll the field up so the popup opens below it.
+        onBeforePopupOpening: (_) =>
+            FieldFocus.ensureRoomForDropdown(_vendorDropdownKey.currentContext),
         items: itemList,
         selectedItem: selectedItem,
         dropdownDecoratorProps: const DropDownDecoratorProps(
@@ -594,6 +597,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       focusNode: focusNode,
       child: DropdownSearch<String>(
         key: dropdownKey,
+        // Bug #30 — scroll the field up so the popup opens below it.
+        onBeforePopupOpening: (_) =>
+            FieldFocus.ensureRoomForDropdown(dropdownKey.currentContext),
         enabled: enabled,
         items: items,
         selectedItem: value,

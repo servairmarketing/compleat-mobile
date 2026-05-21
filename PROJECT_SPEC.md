@@ -128,6 +128,15 @@ All DropdownSearch / dropdown widgets must have
 previously-entered fields when the keyboard is up. This applies to every
 screen with a multi-field form.
 
+Dropdowns must always open BELOW their field, never above. Before opening,
+scroll the field to the upper portion of viewport so room exists below.
+Combine with 40% maxHeight cap.
+
+Implementation: every DropdownSearch wires `onBeforePopupOpening` to
+`FieldFocus.ensureRoomForDropdown(...)`, which scrolls the field to ~20% from
+the top before the popup is positioned. `FieldFocus.advance` applies the same
+0.2 alignment for auto-advanced fields.
+
 ## BUILD & COMMIT RULES
 Mobile builds happen via GitHub Actions, NEVER locally.
 - Claude Code's workflow: edit code → commit to git → push to main

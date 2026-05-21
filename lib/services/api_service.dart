@@ -48,6 +48,25 @@ class ApiService {
     await prefs.remove('user_profile');
   }
 
+  // Bug #31 — a 5xx from Cloud Run can return an HTML / plain-text error page
+  // instead of JSON. jsonDecode then throws "FormatException: Unexpected
+  // character (at character 1)", which used to surface raw in the UI. Decode
+  // defensively and return a clean, user-facing message instead.
+  static const String serverErrorMessage =
+      'Server error. Please try again or contact admin.';
+
+  static Map<String, dynamic> _decodeBody(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      // Valid JSON but not an object (array / string / number) — not something
+      // a caller can act on; treat it as a server error.
+      return {'success': false, 'detail': serverErrorMessage};
+    } on FormatException {
+      return {'success': false, 'detail': serverErrorMessage};
+    }
+  }
+
   static Future<Map<String, dynamic>> post(String endpoint, Map<String, dynamic> body) async {
     try {
       final token = await getToken();
@@ -63,7 +82,7 @@ class ApiService {
         await logout();
         return {'success': false, 'detail': 'session_expired'};
       }
-      return jsonDecode(response.body);
+      return _decodeBody(response.body);
     } catch (e) {
       return {'success': false, 'detail': e.toString()};
     }
@@ -86,7 +105,7 @@ class ApiService {
       await logout();
       return {'success': false, 'detail': 'session_expired'};
     }
-    return jsonDecode(response.body);
+    return _decodeBody(response.body);
   }
 
   static Future<Map<String, dynamic>> get(String endpoint) async {
@@ -103,6 +122,8 @@ class ApiService {
         await logout();
         return {'error': 'session_expired'};
       }
+      // get() keeps its {'error': ...} failure shape; a non-JSON body falls
+      // through to the catch below (callers of get() check ['error']).
       return jsonDecode(response.body);
     } catch (e) {
       return {'error': e.toString()};
@@ -116,7 +137,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'password': password}),
       ).timeout(const Duration(seconds: 15));
-      return jsonDecode(response.body);
+      return _decodeBody(response.body);
     } catch (e) {
       return {'success': false, 'detail': e.toString()};
     }
@@ -131,6 +152,6 @@ class ApiService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'username': username, 'password': password}),
     ).timeout(const Duration(seconds: 15));
-    return jsonDecode(response.body);
+    return _decodeBody(response.body);
   }
 }

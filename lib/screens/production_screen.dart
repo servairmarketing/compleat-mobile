@@ -936,6 +936,9 @@ class _ProductionScreenState extends State<ProductionScreen>
             focusNode: _lpProductFocus,
             child: DropdownSearch<String>(
             key: _lpProductKey,
+            // Bug #30 — scroll the field up so the popup opens below it.
+            onBeforePopupOpening: (_) =>
+                FieldFocus.ensureRoomForDropdown(_lpProductKey.currentContext),
             items: _lpFilteredProducts.map((p) => '${p['product_id']} — ${p['product_name']}').toList(),
             selectedItem: _lpSelectedProduct != null && _lpFilteredProducts.any((p) => p['product_id'] == _lpSelectedProduct)
                 ? '$_lpSelectedProduct — ${_lpFilteredProducts.firstWhere((p) => p['product_id'] == _lpSelectedProduct)['product_name']}'
