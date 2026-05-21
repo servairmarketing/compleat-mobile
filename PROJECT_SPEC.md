@@ -134,10 +134,12 @@ Mobile builds happen via GitHub Actions, NEVER locally.
 - GitHub Actions auto-triggers the build on push
 - NEVER run `flutter build` locally — disk space is constrained on this Cloud Shell environment
 - compleat-mobile IS a git repo — always commit and push there
-- compleat-inventory (backend + web) is NOT a git repo — deploy from disk via gcloud / firebase commands
+- compleat-inventory (backend + web) is now ALSO a git repo. Same commit-and-push discipline as compleat-mobile. After any backend or web change, commit and push to the compleat-inventory repo before reporting work complete.
+- compleat-inventory still deploys from disk via gcloud / firebase commands — git tracking is separate from deployment
 - After every code change in compleat-mobile, the commit MUST be made and pushed in the same session — never leave uncommitted changes
 
 ## Change Log
+2026-05-21 — BUILD & COMMIT RULES: compleat-inventory is now a git repo; same commit-and-push discipline applies
 2026-04-02 — PROJECT_SPEC.md created
 2026-04-02 — LABEL_SPEC.md created
 2026-04-02 — Blank test button removed from printer settings
