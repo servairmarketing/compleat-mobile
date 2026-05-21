@@ -117,8 +117,15 @@ class _ProductionScreenState extends State<ProductionScreen>
         TabController(length: 2, vsync: this, initialIndex: _lastTabIndex);
     _tabController.addListener(_handleTabChange);
     _loadProducts();
+    // Bug #22 — first paint focuses the first field of whichever tab was
+    // restored (Label Printing or Roll Production), not always the Label tab.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _lpParent1Focus.requestFocus();
+      if (!mounted) return;
+      if (_lastTabIndex == 0) {
+        _lpParent1Focus.requestFocus();
+      } else {
+        _rpParent1Focus.requestFocus();
+      }
     });
   }
 
@@ -846,7 +853,14 @@ class _ProductionScreenState extends State<ProductionScreen>
               title: const Text('Two parent rolls', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               subtitle: const Text('Enable if child roll spans two parent rolls'),
               value: _lpTwoParent,
-              onChanged: (v) => setState(() { _lpTwoParent = v; if (!v) _lpParent2.clear(); }),
+              // Bug #22 — flipping the mode reconfigures the form; return
+              // focus to the first input field (Parent Roll 1).
+              onChanged: (v) {
+                setState(() { _lpTwoParent = v; if (!v) _lpParent2.clear(); });
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _lpParent1Focus.requestFocus();
+                });
+              },
             ),
           ),
           const SizedBox(height: 12),
@@ -1078,15 +1092,23 @@ class _ProductionScreenState extends State<ProductionScreen>
               ),
               value: _rpTwoParent,
               activeColor: Colors.orange[800],
-              onChanged: (v) => setState(() {
-                _rpTwoParent = v;
-                // Drop any pending first-scan when the mode flips so the next
-                // scan starts fresh in the new mode.
-                _rpFirstScanProduct = null;
-                _rpFirstScanParent = null;
-                // Note: do NOT clear _rpParent2 — keep parent 2 populated so
-                // flipping back to two-parent mode mid-batch doesn't lose it.
-              }),
+              onChanged: (v) {
+                setState(() {
+                  _rpTwoParent = v;
+                  // Drop any pending first-scan when the mode flips so the
+                  // next scan starts fresh in the new mode.
+                  _rpFirstScanProduct = null;
+                  _rpFirstScanParent = null;
+                  // Note: do NOT clear _rpParent2 — keep parent 2 populated
+                  // so flipping back to two-parent mode mid-batch keeps it.
+                });
+                // Bug #22 — flipping the mode reconfigures the batch; return
+                // focus to the first input field (Parent Roll 1), NOT the
+                // scan field that two-parent mode would otherwise grab.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _rpParent1Focus.requestFocus();
+                });
+              },
             ),
           ),
           const SizedBox(height: 12),
@@ -1209,6 +1231,9 @@ class _ProductionScreenState extends State<ProductionScreen>
             TwoParentScanFields(
               key: const Key('rpTwoParentScan'),
               firstFieldFocusNode: _rpScanFocus,
+              // Bug #22 — don't steal focus to the scan field on mount; the
+              // toggle handler keeps focus on Parent Roll 1.
+              autofocusOnMount: false,
               onPair: _processTwoParentPair,
             )
           else
@@ -1272,8 +1297,12 @@ class _ProductionScreenState extends State<ProductionScreen>
           // Parent roll status — Production or Finished only. A parent used
           // in production cannot remain "in_stock", so that option is gone.
           // Each parent in scope needs its own explicit selection.
+          // Bug #21 — in two-parent mode each status block names its actual
+          // parent roll ID so the operator knows which picker is which.
           Text(
-            (_rpBatchMode ?? _rpTwoParent) ? 'Parent Roll 1 Status *' : 'Parent Roll Status *',
+            (_rpBatchMode ?? _rpTwoParent)
+                ? 'Parent 1 — ${_rpParent1.text.trim().isEmpty ? '(not set)' : _rpParent1.text.trim()}  ·  Status *'
+                : 'Parent Roll Status *',
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
@@ -1284,7 +1313,10 @@ class _ProductionScreenState extends State<ProductionScreen>
           ]),
           if (_rpBatchMode ?? _rpTwoParent) ...[
             const SizedBox(height: 12),
-            const Text('Parent Roll 2 Status *', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            Text(
+              'Parent 2 — ${_rpParent2.text.trim().isEmpty ? '(not set)' : _rpParent2.text.trim()}  ·  Status *',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Row(children: [
               _statusButton(2, 'production', '🟡 Production', Colors.orange[700]!),

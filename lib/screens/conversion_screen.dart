@@ -501,11 +501,19 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
               ),
               value: _sourceTwoParent,
               activeColor: Colors.orange[800],
-              onChanged: _findingSource ? null : (v) => setState(() {
-                _sourceTwoParent = v;
-                _pendingSourceFirstScan = null;
-                _sourceScanController.clear();
-              }),
+              onChanged: _findingSource ? null : (v) {
+                setState(() {
+                  _sourceTwoParent = v;
+                  _pendingSourceFirstScan = null;
+                  _sourceScanController.clear();
+                });
+                // Bug #22 — after the mode flip, focus the source scan
+                // field (the first input) so toggling never leaves the
+                // form unfocused.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _sourceScanFocus.requestFocus();
+                });
+              },
             ),
           ),
           const SizedBox(height: 12),

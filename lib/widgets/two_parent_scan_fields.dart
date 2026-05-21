@@ -28,6 +28,13 @@ class TwoParentScanFields extends StatefulWidget {
   /// When null, the widget owns and disposes its own node.
   final FocusNode? firstFieldFocusNode;
 
+  /// Bug #22 — whether to grab focus into scan field 1 when the widget first
+  /// mounts. True is right when the scan field is the first input the
+  /// operator needs (e.g. Conversion source, Annual Child stock-take). Set
+  /// false when an earlier field (e.g. Parent Roll 1) should keep focus —
+  /// the host screen then drives focus itself.
+  final bool autofocusOnMount;
+
   final String field1Label;
   final String field2Label;
   final String field1Hint;
@@ -38,6 +45,7 @@ class TwoParentScanFields extends StatefulWidget {
     required this.onPair,
     this.enabled = true,
     this.firstFieldFocusNode,
+    this.autofocusOnMount = true,
     this.field1Label = 'Scan label 1 of 2',
     this.field2Label = 'Scan label 2 of 2',
     this.field1Hint = "Scan first parent's label",
@@ -64,7 +72,7 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
     _ownsF1 = widget.firstFieldFocusNode == null;
     _f1 = widget.firstFieldFocusNode ?? FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _f1.requestFocus();
+      if (mounted && widget.autofocusOnMount) _f1.requestFocus();
     });
   }
 

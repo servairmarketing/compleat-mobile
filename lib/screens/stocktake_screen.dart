@@ -385,6 +385,36 @@ Widget _stSimpleDropdown({
   );
 }
 
+// ─── Bug #20 — operator-selectable initial status ───────────────────
+// Initial Stock Entry lets the operator record already-consumed legacy
+// inventory by choosing its status. Annual stock-take modes never set
+// status (they reconcile physical scans), so they don't use this.
+const Map<String, String> _statusLabels = {
+  'in_stock': 'In Stock',
+  'production': 'Production',
+  'finished': 'Finished',
+  'sold': 'Sold',
+};
+
+Widget _stStatusDropdown({
+  required List<String> allowedValues,
+  required String value,
+  required Function(String) onChanged,
+}) {
+  return _stSimpleDropdown(
+    widgetKey: const Key('stocktakeStatusDropdown'),
+    label: 'Status *',
+    items: [for (final v in allowedValues) _statusLabels[v]!],
+    value: _statusLabels[value],
+    onChanged: (label) {
+      if (label == null) return;
+      for (final v in allowedValues) {
+        if (_statusLabels[v] == label) { onChanged(v); return; }
+      }
+    },
+  );
+}
+
 Widget _stMessage(String? message, bool success) {
   if (message == null) return const SizedBox.shrink();
   return Container(
@@ -425,6 +455,8 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   final _rollIdFocus = FocusNode();
 
   String? _vendor, _materialType, _basisWeight, _width;
+  // Bug #20 — operator-chosen initial status (legacy inventory entry).
+  String _status = 'in_stock';
   bool _submitting = false;
   String? _message;
   bool _ok = false;
@@ -451,6 +483,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       _materialType = snap['materialType'];
       _basisWeight = snap['basisWeight'];
       _width = snap['width'];
+      _status = snap['status'] ?? 'in_stock';
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
@@ -507,6 +540,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       'materialType': _materialType,
       'basisWeight': _basisWeight,
       'width': _width,
+      'status': _status,
     });
     _rollIdCtrl.dispose(); _poCtrl.dispose();
     _lengthCtrl.dispose(); _weightCtrl.dispose();
@@ -547,6 +581,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       'width': double.tryParse(_width ?? '') ?? 0,
       'length': double.tryParse(_lengthCtrl.text) ?? 0,
       'weight': double.tryParse(_weightCtrl.text) ?? 0,
+      'status': _status,
       'notes': _notesCtrl.text.trim(),
     });
     if (res['success'] == true) {
@@ -571,6 +606,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       _vendor = null; _materialType = null;
       _basisWeight = null; _width = null;
       _rollIdError = null;
+      _status = 'in_stock';
     });
     _lastCheckedRollId = '';
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -684,6 +720,12 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
+            _stStatusDropdown(
+              allowedValues: const ['in_stock', 'production', 'finished'],
+              value: _status,
+              onChanged: (v) => setState(() => _status = v),
+            ),
+            const SizedBox(height: 14),
             _stField('Notes', _notesCtrl, multiline: true),
             const SizedBox(height: 24),
             SizedBox(
@@ -729,6 +771,8 @@ class _InitialChildFormState extends State<_InitialChildForm> {
 
   bool _twoParent = false;
   String? _productId, _productName;
+  // Bug #20 — operator-chosen initial status (legacy inventory entry).
+  String _status = 'in_stock';
   bool _submitting = false;
   String? _message;
   bool _ok = false;
@@ -751,6 +795,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       _twoParent = snap['twoParent'] ?? false;
       _productId = snap['productId'];
       _productName = snap['productName'];
+      _status = snap['status'] ?? 'in_stock';
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _parent1Focus.requestFocus();
@@ -770,6 +815,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       'twoParent': _twoParent,
       'productId': _productId,
       'productName': _productName,
+      'status': _status,
     });
     _parent1Ctrl.dispose(); _parent2Ctrl.dispose();
     _qtyCtrl.dispose(); _lengthCtrl.dispose();
@@ -813,6 +859,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       'quantity': qty,
       'length': double.tryParse(_lengthCtrl.text) ?? 0,
       'weight': double.tryParse(_weightCtrl.text) ?? 0,
+      'status': _status,
       'notes': _notesCtrl.text.trim(),
     });
     if (res['success'] == true) {
@@ -849,6 +896,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
     _weightCtrl.clear(); _notesCtrl.clear();
     setState(() {
       _productId = null; _productName = null;
+      _status = 'in_stock';
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _parent1Focus.requestFocus();
@@ -881,7 +929,14 @@ class _InitialChildFormState extends State<_InitialChildForm> {
               Switch(
                 key: const Key('stocktakeTwoParentToggle'),
                 value: _twoParent,
-                onChanged: (v) => setState(() => _twoParent = v),
+                // Bug #22 — after the mode flip, focus the first input
+                // field (Parent Roll ID 1).
+                onChanged: (v) {
+                  setState(() => _twoParent = v);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _parent1Focus.requestFocus();
+                  });
+                },
               ),
             ]),
             const SizedBox(height: 8),
@@ -946,6 +1001,12 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                 widgetKey: const Key('stocktakeWeightField'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 textInputAction: TextInputAction.done),
+            const SizedBox(height: 14),
+            _stStatusDropdown(
+              allowedValues: const ['in_stock', 'production', 'finished', 'sold'],
+              value: _status,
+              onChanged: (v) => setState(() => _status = v),
+            ),
             const SizedBox(height: 14),
             _stField('Notes', _notesCtrl, multiline: true),
             const SizedBox(height: 24),
@@ -1899,7 +1960,14 @@ class _PrintChildFormState extends State<_PrintChildForm> {
               Switch(
                 key: const Key('stocktakeTwoParentToggle'),
                 value: _twoParent,
-                onChanged: (v) => setState(() => _twoParent = v),
+                // Bug #22 — after the mode flip, focus the first input
+                // field (Parent Roll ID 1).
+                onChanged: (v) {
+                  setState(() => _twoParent = v);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _parent1Focus.requestFocus();
+                  });
+                },
               ),
             ]),
             const SizedBox(height: 8),

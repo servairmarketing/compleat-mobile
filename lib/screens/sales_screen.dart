@@ -508,6 +508,12 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                           _pendingFirstScan = null;
                           _scanController.clear();
                         });
+                        // Bug #22 — after the mode flip, focus the scan
+                        // field (the next input) so single↔two-parent
+                        // toggling never leaves the form unfocused.
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _scanFocus.requestFocus();
+                        });
                       },
                     ),
                   ),
