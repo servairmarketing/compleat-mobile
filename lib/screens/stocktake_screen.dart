@@ -348,6 +348,7 @@ Widget _stField(String label, TextEditingController controller,
 }
 
 Widget _stSimpleDropdown({
+  required BuildContext context,
   required String label,
   required List<String> items,
   required String? value,
@@ -369,7 +370,9 @@ Widget _stSimpleDropdown({
     ),
     popupProps: PopupProps.menu(
       showSearchBox: items.length > 5,
-      constraints: const BoxConstraints(maxHeight: 250),
+      // DROPDOWN UX RULE — cap at 40% of screen height so the popup never
+      // covers previously-entered form fields (see PROJECT_SPEC.md).
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
       itemBuilder: (context, item, isSelected) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Text(item, style: TextStyle(
@@ -393,11 +396,13 @@ Widget _stSimpleDropdown({
 // Labels come from the shared rollStatusLabels map (services/roll_status.dart).
 
 Widget _stStatusDropdown({
+  required BuildContext context,
   required List<String> allowedValues,
   required String value,
   required Function(String) onChanged,
 }) {
   return _stSimpleDropdown(
+    context: context,
     widgetKey: const Key('stocktakeStatusDropdown'),
     label: 'Status *',
     items: [for (final v in allowedValues) rollStatusLabel(v)],
@@ -649,7 +654,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
               ),
               popupProps: PopupProps.menu(
                 showSearchBox: true,
-                constraints: const BoxConstraints(maxHeight: 300),
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               ),
               onChanged: (val) {
                 FocusManager.instance.primaryFocus?.unfocus();
@@ -663,6 +668,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 keyboardType: TextInputType.emailAddress),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              context: context,
               widgetKey: const Key('stocktakeMaterialTypeDropdown'),
               label: 'Material Type *',
               items: widget.materialTypes,
@@ -678,6 +684,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             ),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              context: context,
               widgetKey: const Key('stocktakeBasisWeightDropdown'),
               label: 'Basis Weight *',
               items: widget.basisWeights,
@@ -695,6 +702,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             Row(children: [
               Expanded(
                 child: _stSimpleDropdown(
+                  context: context,
                   widgetKey: const Key('stocktakeWidthDropdown'),
                   label: 'Width (in) *',
                   items: widget.widths,
@@ -717,6 +725,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stStatusDropdown(
+              context: context,
               allowedValues: const ['in_stock', 'in_production', 'consumed'],
               value: _status,
               onChanged: (v) => setState(() => _status = v),
@@ -961,7 +970,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
               ),
               popupProps: PopupProps.menu(
                 showSearchBox: true,
-                constraints: const BoxConstraints(maxHeight: 300),
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               ),
               onChanged: (val) {
                 FocusManager.instance.primaryFocus?.unfocus();
@@ -999,6 +1008,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stStatusDropdown(
+              context: context,
               allowedValues: const ['in_stock', 'in_production', 'converted', 'sold'],
               value: _status,
               onChanged: (v) => setState(() => _status = v),
@@ -1256,7 +1266,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
               ),
               popupProps: PopupProps.menu(
                 showSearchBox: true,
-                constraints: const BoxConstraints(maxHeight: 300),
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               ),
               onChanged: (val) {
                 FocusManager.instance.primaryFocus?.unfocus();
@@ -1268,6 +1278,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
             _stField('PO Number', _poCtrl),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              context: context,
               label: 'Material Type *',
               items: widget.materialTypes,
               value: _materialType,
@@ -1282,6 +1293,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
             ),
             const SizedBox(height: 14),
             _stSimpleDropdown(
+              context: context,
               label: 'Basis Weight *',
               items: widget.basisWeights,
               value: _basisWeight,
@@ -1298,6 +1310,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
             Row(children: [
               Expanded(
                 child: _stSimpleDropdown(
+                  context: context,
                   label: 'Width (in) *',
                   items: widget.widths,
                   value: _width,
@@ -1992,7 +2005,7 @@ class _PrintChildFormState extends State<_PrintChildForm> {
               ),
               popupProps: PopupProps.menu(
                 showSearchBox: true,
-                constraints: const BoxConstraints(maxHeight: 300),
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               ),
               onChanged: (val) {
                 FocusManager.instance.primaryFocus?.unfocus();
