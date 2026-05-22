@@ -31,6 +31,12 @@ class FieldFocus {
 
   static const Duration _scrollDuration = Duration(milliseconds: 200);
 
+  /// Bug #30 (revised) — cap on how long [ensureRoomForDropdown] waits for the
+  /// keyboard-dismiss animation + layout reflow to settle before it positions
+  /// the popup anyway. Long enough for a typical soft-keyboard dismiss,
+  /// bounded so a device that never reports a zero inset cannot stall the UI.
+  static const Duration _keyboardDismissMaxWait = Duration(milliseconds: 400);
+
   /// Move focus to [target] after [advanceDelay]. Optionally open a
   /// DropdownSearch popup ([openDropdown]) once focused. The target field is
   /// scrolled to [dropdownFieldAlignment] FIRST; the dropdown is opened only
@@ -64,20 +70,55 @@ class FieldFocus {
     });
   }
 
-  /// Bug #30 — wired into every DropdownSearch via
-  /// `DropdownSearch.onBeforePopupOpening`. Scrolls the dropdown's own field
-  /// ([context]) to [dropdownFieldAlignment] BEFORE the popup is positioned,
-  /// so it always opens BELOW the field, never upward over earlier fields.
+  /// Bug #30 (revised) — wired into every DropdownSearch via
+  /// `DropdownSearch.onBeforePopupOpening`, which `_selectSearchMode` AWAITS
+  /// before it positions and opens the popup. That await is the whole fix:
+  ///
+  ///  1. The keyboard may still be up when the field is tapped. If the popup
+  ///     were positioned now, the keyboard would then dismiss, the layout
+  ///     would reflow, the field would shift up — and the already-anchored
+  ///     popup would end up covering / misaligned with the field.
+  ///  2. So dismiss the keyboard FIRST, then wait until the dismiss animation
+  ///     and the layout reflow it triggers have fully settled
+  ///     (`viewInsets.bottom` back to 0).
+  ///  3. THEN scroll the field to [dropdownFieldAlignment] (~20% from top).
+  ///  4. Only after all of that does this future complete, letting
+  ///     dropdown_search compute the popup position against the field's
+  ///     FINAL, settled location — so the popup always opens cleanly below.
+  ///
   /// Always returns true so the popup still opens.
   static Future<bool> ensureRoomForDropdown(BuildContext? context) async {
-    if (context != null && context.mounted) {
-      await Scrollable.ensureVisible(
-        context,
-        alignment: dropdownFieldAlignment,
-        duration: _scrollDuration,
-        curve: Curves.easeOut,
-      );
-    }
+    if (context == null || !context.mounted) return true;
+    // Step 1+2 — dismiss the keyboard and wait for the reflow to settle.
+    FocusScope.of(context).unfocus();
+    await _awaitKeyboardDismissed(context);
+    if (!context.mounted) return true;
+    // Step 3 — now that the field sits at its final position, scroll it up so
+    // the popup has room to open below it.
+    await Scrollable.ensureVisible(
+      context,
+      alignment: dropdownFieldAlignment,
+      duration: _scrollDuration,
+      curve: Curves.easeOut,
+    );
     return true;
+  }
+
+  /// Bug #30 (revised) — block until the on-screen keyboard is fully gone and
+  /// the layout reflow it triggers has settled. Polls `viewInsets.bottom`
+  /// until it reaches 0, capped by [_keyboardDismissMaxWait] so a tap with no
+  /// keyboard up (inset already 0) returns immediately and a device that
+  /// never reports a zero inset cannot stall the popup.
+  static Future<void> _awaitKeyboardDismissed(BuildContext context) async {
+    const pollInterval = Duration(milliseconds: 16);
+    final deadline = DateTime.now().add(_keyboardDismissMaxWait);
+    while (context.mounted &&
+        MediaQuery.of(context).viewInsets.bottom > 0 &&
+        DateTime.now().isBefore(deadline)) {
+      await Future.delayed(pollInterval);
+    }
+    // One more frame so the reflow from the final inset change is laid out
+    // before the field is measured for scrolling / popup positioning.
+    await WidgetsBinding.instance.endOfFrame;
   }
 }

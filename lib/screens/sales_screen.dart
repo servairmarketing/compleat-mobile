@@ -253,10 +253,24 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     final sortedParents = List<String>.from(parentIds)..sort();
     final key = '$productId|${sortedParents.join('+')}';
 
+    // Bug #32 — enforce the roll's available-stock limit. `available` is the
+    // live in-stock quantity for this exact product + parent-roll grouping
+    // (see /sales/stock_check, summed over matching child rolls). Scanning the
+    // same roll more times than that would oversell — a data-integrity issue —
+    // so block the increment and hold the counter at the maximum available.
+    final existingIdx = _lines.indexWhere((l) => l.key == key);
+    final currentQty = existingIdx >= 0 ? _lines[existingIdx].quantity : 0;
+    if (currentQty + 1 > available) {
+      _resetScan(focus: !fromTwoParent);
+      _showMessage(
+          'Roll $productId only has $available available — cannot add more.',
+          false);
+      return;
+    }
+
     setState(() {
-      final idx = _lines.indexWhere((l) => l.key == key);
-      if (idx >= 0) {
-        _lines[idx].quantity += 1;
+      if (existingIdx >= 0) {
+        _lines[existingIdx].quantity += 1;
       } else {
         _lines.insert(0, _SaleLine(
           key: key,

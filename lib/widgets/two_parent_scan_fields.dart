@@ -128,8 +128,17 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
         _c1.clear();
         _c2.clear();
         setState(() => _processing = false);
-        _f1.requestFocus();
         _notifyPending();
+        // Bug #33 — return focus to field 1, ready for the next pair scan.
+        // Both fields are `enabled: !_processing`, so field 1 is still
+        // disabled at this point — the `setState` above only SCHEDULES the
+        // rebuild that re-enables it. Calling requestFocus() now would hit a
+        // not-yet-focusable field and silently fail, leaving focus on
+        // field 2. Defer it to after the rebuild lands so field 1 is
+        // focusable when the request is made.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _f1.requestFocus();
+        });
       }
     }
   }
