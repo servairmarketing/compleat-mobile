@@ -70,7 +70,9 @@ jobs:
     # Builds a test-environment APK that points at the test Cloud Run backend.
     # Uses the `test` product flavor (applicationIdSuffix .test) so it installs
     # alongside the prod APK on the same device with its own data + icon.
-    # Triggered by the same events as `build` so every push produces both APKs.
+    # Manual trigger only -- we no longer build the test APK on every push;
+    # normal pushes to main build the prod APK only.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
