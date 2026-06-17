@@ -117,11 +117,23 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     if (_customerCache.containsKey(company)) return;
     setState(() => _loadingCustomers = true);
     final res = await ApiService.get('/masters/customers?company=$company');
-    final list = <Map<String, dynamic>>[];
-    if (res['records'] is List) {
-      for (final r in (res['records'] as List)) {
-        if (r is Map) list.add(Map<String, dynamic>.from(r));
+    // Bug #34 — only cache a SUCCESSFUL fetch. ApiService.get returns
+    // {'error': ...} on a timeout / network failure / 401, in which case
+    // `records` is absent. Caching an empty list there would trip the
+    // `containsKey` guard above and permanently hide that company's
+    // customers for the rest of the session (the cache also survives
+    // navigation via the in-memory FormStateCache). Leave it uncached so
+    // re-selecting the company retries.
+    if (res['records'] is! List) {
+      if (mounted) {
+        setState(() => _loadingCustomers = false);
+        _showMessage('Could not load customers. Tap the company again to retry.', false);
       }
+      return;
+    }
+    final list = <Map<String, dynamic>>[];
+    for (final r in (res['records'] as List)) {
+      if (r is Map) list.add(Map<String, dynamic>.from(r));
     }
     list.sort((a, b) => (a['display_name'] ?? '').toString()
         .toLowerCase()
@@ -131,7 +143,10 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
   }
 
   Future<void> _onCompanyChanged(String company) async {
-    if (_company == company) return;
+    // Bug #34 — re-tapping the SAME company is a no-op only once its customers
+    // are loaded. If a prior fetch failed (nothing cached), allow the tap to
+    // retry the load rather than silently doing nothing.
+    if (_company == company && _customerCache.containsKey(company)) return;
     setState(() {
       _company = company;
       _selectedCustomer = null;
