@@ -116,7 +116,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
   Future<void> _loadCustomers(String company) async {
     if (_customerCache.containsKey(company)) return;
     setState(() => _loadingCustomers = true);
-    final res = await ApiService.get('/masters/customers?company=$company');
+    final res = await ApiService.get('/txn/customers?company=$company');
     // Bug #34 — only cache a SUCCESSFUL fetch. ApiService.get returns
     // {'error': ...} on a timeout / network failure / 401, in which case
     // `records` is absent. Caching an empty list there would trip the
