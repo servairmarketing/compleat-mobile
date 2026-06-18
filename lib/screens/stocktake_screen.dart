@@ -1455,11 +1455,13 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
     super.dispose();
   }
 
-  // Composite barcode: "ProductID-ParentID". Split at first "-".
+  // Composite barcode: "ProductID-ParentID". Split at LAST "-" — product IDs
+  // contain hyphens (e.g. BRK-607800) but parent roll IDs don't, so the last
+  // hyphen separates them. Matches sales/conversion/production scanner screens.
   ({String productId, String parentId})? _parseComposite(String raw) {
     final v = raw.trim();
     if (v.isEmpty) return null;
-    final i = v.indexOf('-');
+    final i = v.lastIndexOf('-');
     if (i <= 0 || i >= v.length - 1) return null;
     return (productId: v.substring(0, i), parentId: v.substring(i + 1));
   }
