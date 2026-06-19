@@ -87,6 +87,39 @@ class PrinterService {
     }
   }
 
+  /// Translates a raw printer result string into a friendly, non-technical
+  /// message suitable for an operator. Returns `null` when [result] indicates
+  /// success (i.e. it has no `ERROR` prefix), so callers can branch on null.
+  ///
+  /// Shared by every screen that prints so a failed print never surfaces a
+  /// raw socket error like `EHOSTUNREACH ... socketConnected=false`.
+  static String? friendlyPrintError(String result) {
+    if (!result.startsWith('ERROR')) return null;
+    final lower = result.toLowerCase();
+    if (lower.contains('no printer ip')) {
+      return 'No printer is configured. Set the printer IP in Printer Settings.';
+    }
+    if (lower.contains('ehostunreach') ||
+        lower.contains('unreachable') ||
+        lower.contains('socket') ||
+        lower.contains('econnrefused') ||
+        lower.contains('connection refused') ||
+        lower.contains('timed out') ||
+        lower.contains('timeout') ||
+        lower.contains('no route') ||
+        lower.contains('network') ||
+        lower.contains('connect') ||
+        lower.contains('no response')) {
+      return 'Printer not reachable — check you’re on the warehouse network. '
+          'You can print later.';
+    }
+    if (lower.contains('iprint') || lower.contains('brother')) {
+      return 'Could not reach the printer. Make sure the Brother iPrint&Label '
+          'app is installed and you’re on the warehouse network.';
+    }
+    return 'Label could not be printed. Please try again, or print it later.';
+  }
+
   static Future<List<String>> discoverPrinters() async {
     try {
       final result = await _channel.invokeListMethod<String>('discoverPrinters');

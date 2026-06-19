@@ -485,7 +485,7 @@ class _ProductionScreenState extends State<ProductionScreen>
         if (mounted) _lpParent1Focus.requestFocus();
       });
     } else {
-      _showMessage('Printing failed. Make sure Brother iPrint&Label app is installed.', false);
+      _showMessage(PrinterService.friendlyPrintError(errorDetail)!, false);
     }
   }
 

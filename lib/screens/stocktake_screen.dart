@@ -8,6 +8,7 @@ import '../services/form_state_cache.dart';
 import '../services/roll_status.dart';
 import '../services/field_focus.dart';
 import '../widgets/two_parent_scan_fields.dart';
+import '../widgets/save_print_clear_bar.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 
@@ -419,20 +420,43 @@ Widget _stStatusDropdown({
   );
 }
 
-Widget _stMessage(String? message, bool success) {
+// Three message states: success (green), error (red), and a non-blocking
+// [warning] (amber). `warning` is used when a save succeeded but the optional
+// print step failed — the save must NOT read as a red error.
+Widget _stMessage(String? message, bool success, {bool warning = false}) {
   if (message == null) return const SizedBox.shrink();
+  final Color bg, border, fg;
+  if (warning) {
+    bg = Colors.amber[100]!; border = Colors.amber[700]!; fg = Colors.amber[900]!;
+  } else if (success) {
+    bg = Colors.green[100]!; border = Colors.green; fg = Colors.green[800]!;
+  } else {
+    bg = Colors.red[100]!; border = Colors.red; fg = Colors.red[800]!;
+  }
   return Container(
     width: double.infinity,
     padding: const EdgeInsets.all(14),
     margin: const EdgeInsets.only(bottom: 16),
     decoration: BoxDecoration(
-      color: success ? Colors.green[100] : Colors.red[100],
+      color: bg,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: success ? Colors.green : Colors.red),
+      border: Border.all(color: border),
     ),
-    child: Text(message, style: TextStyle(
-      color: success ? Colors.green[800] : Colors.red[800],
-      fontSize: 16, fontWeight: FontWeight.bold)),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          warning
+              ? Icons.info_outline
+              : (success ? Icons.check_circle_outline : Icons.error_outline),
+          color: fg, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(message, style: TextStyle(
+            color: fg, fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
+      ],
+    ),
   );
 }
 
@@ -462,8 +486,15 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   // Bug #20 — operator-chosen initial status (legacy inventory entry).
   String _status = 'in_stock';
   bool _submitting = false;
+  bool _printing = false;
   String? _message;
   bool _ok = false;
+  bool _warn = false;
+
+  // Decoupled print: the roll id saved by the last successful Save. Non-null
+  // means the Print Label button is enabled and prints THIS roll. Cleared by
+  // the Clear button so a stale label can't be printed for a new entry.
+  String? _printTarget;
 
   // Bug #6 — inline duplicate Roll ID check.
   String? _rollIdError;
@@ -589,20 +620,40 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       'notes': _notesCtrl.text.trim(),
     });
     if (res['success'] == true) {
-      final id = res['roll_id'] ?? rollId;
-      final printDetail = await PrinterService.printParentOnlyLabel(parentId: id);
-      if (printDetail.startsWith('ERROR')) {
-        setState(() { _message = 'Roll $id added but printing failed: $printDetail'; _ok = false; });
-      } else {
-        setState(() { _message = 'Roll $id added & label printed!'; _ok = true; });
-      }
+      // Save only — printing is now a separate, optional action. Clear the
+      // entry fields for the next roll but retain the print target so the
+      // operator can still print this roll's label.
+      final id = (res['roll_id'] ?? rollId).toString();
       _clear();
+      setState(() {
+        _printTarget = id;
+        _message = 'Roll $id added to stock. Tap "Print Label" to print, or continue.';
+        _ok = true; _warn = false;
+      });
     } else {
-      setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; });
+      setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; _warn = false; });
     }
     setState(() => _submitting = false);
   }
 
+  // Optional, independent print step. A print failure is shown as a
+  // non-blocking note (amber) — it never undoes or masks the successful save.
+  Future<void> _print() async {
+    final id = _printTarget;
+    if (id == null) return;
+    setState(() => _printing = true);
+    final detail = await PrinterService.printParentOnlyLabel(parentId: id);
+    setState(() => _printing = false);
+    final friendly = PrinterService.friendlyPrintError(detail);
+    if (friendly == null) {
+      setState(() { _message = 'Label for roll $id sent to printer.'; _ok = true; _warn = false; });
+    } else {
+      setState(() { _message = 'Roll $id is saved. $friendly'; _ok = false; _warn = true; });
+    }
+  }
+
+  // Clears the entry fields only (used after a successful save). Leaves the
+  // print target and message untouched.
   void _clear() {
     _rollIdCtrl.clear(); _poCtrl.clear();
     _lengthCtrl.clear(); _weightCtrl.clear(); _notesCtrl.clear();
@@ -616,6 +667,13 @@ class _InitialParentFormState extends State<_InitialParentForm> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rollIdFocus.requestFocus();
     });
+  }
+
+  // Clear button: reset the form AND drop the print target + message so the
+  // screen is fully ready for the next entry.
+  void _clearAll() {
+    _clear();
+    setState(() { _printTarget = null; _message = null; _warn = false; });
   }
 
   @override
@@ -634,7 +692,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _stMessage(_message, _ok),
+            _stMessage(_message, _ok, warning: _warn),
             _stField('Roll ID *', _rollIdCtrl, focusNode: _rollIdFocus,
                 widgetKey: const Key('stocktakeRollIdField'),
                 hint: 'Operator-entered, must be unique',
@@ -738,22 +796,17 @@ class _InitialParentFormState extends State<_InitialParentForm> {
             const SizedBox(height: 14),
             _stField('Notes', _notesCtrl, multiline: true),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                key: const Key('stocktakeSubmitButton'),
-                onPressed: (_submitting || _rollIdError != null) ? null : _submit,
-                icon: _submitting
-                    ? const SizedBox(width: 20, height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.add_box, size: 24),
-                label: Text(_submitting ? 'Saving...' : 'Add to Stock + Print Label',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1a73e8),
-                  foregroundColor: Colors.white),
-              ),
+            SavePrintClearBar(
+              saveButtonKey: const Key('stocktakeSubmitButton'),
+              onSave: (_submitting || _rollIdError != null) ? null : _submit,
+              saving: _submitting,
+              saveLabel: 'Add to Stock',
+              saveIcon: Icons.add_box,
+              onPrint: _print,
+              printing: _printing,
+              canPrint: _printTarget != null,
+              printLabel: 'Print Label',
+              onClear: _clearAll,
             ),
           ],
         ),
@@ -784,8 +837,16 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   // Bug #20 — operator-chosen initial status (legacy inventory entry).
   String _status = 'in_stock';
   bool _submitting = false;
+  bool _printing = false;
   String? _message;
   bool _ok = false;
+  bool _warn = false;
+
+  // Decoupled print: snapshot of the last successfully-saved child entry so
+  // its labels can be (re)printed independently. Non-null => Print enabled.
+  List<String>? _printParents;
+  String? _printProductId, _printProductName;
+  int _printQty = 0;
 
   // Bug #14 — in-memory form-state cache key for this sub-form.
   static const _cacheKey = 'stocktake_initial_child';
@@ -873,33 +934,61 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       'notes': _notesCtrl.text.trim(),
     });
     if (res['success'] == true) {
-      String? errorDetail;
-      outer:
-      for (final pid in parents) {
-        for (var i = 0; i < qty; i++) {
-          final detail = await PrinterService.printLabel(
-            productId: _productId!,
-            productName: _productName ?? _productId!,
-            parentRollId1: pid,
-            parentRollId2: null,
-            quantity: 1,
-          );
-          if (detail.startsWith('ERROR')) { errorDetail = detail; break outer; }
-        }
-      }
-      if (errorDetail == null) {
-        final total = qty * parents.length;
-        setState(() { _message = 'Child added & $total label(s) printed!'; _ok = true; });
-      } else {
-        setState(() { _message = 'Child added but printing failed: $errorDetail'; _ok = false; });
-      }
+      // Save only — snapshot what to print, then clear the fields for the
+      // next entry while keeping the Print Labels button available.
+      final printParents = List<String>.from(parents);
+      final pid = _productId!;
+      final pname = _productName ?? _productId!;
+      final pqty = qty;
       _clear();
+      final total = pqty * printParents.length;
+      setState(() {
+        _printParents = printParents;
+        _printProductId = pid;
+        _printProductName = pname;
+        _printQty = pqty;
+        _message = 'Child roll added to stock. Tap "Print Labels" to print '
+            '$total label(s), or continue.';
+        _ok = true; _warn = false;
+      });
     } else {
-      setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; });
+      setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; _warn = false; });
     }
     setState(() => _submitting = false);
   }
 
+  // Optional, independent print step for the last saved child entry. A print
+  // failure is a non-blocking note — the save is already done.
+  Future<void> _print() async {
+    final parents = _printParents;
+    final pid = _printProductId;
+    if (parents == null || pid == null || _printQty < 1) return;
+    setState(() => _printing = true);
+    String? errorDetail;
+    outer:
+    for (final p in parents) {
+      for (var i = 0; i < _printQty; i++) {
+        final detail = await PrinterService.printLabel(
+          productId: pid,
+          productName: _printProductName ?? pid,
+          parentRollId1: p,
+          parentRollId2: null,
+          quantity: 1,
+        );
+        if (detail.startsWith('ERROR')) { errorDetail = detail; break outer; }
+      }
+    }
+    setState(() => _printing = false);
+    if (errorDetail == null) {
+      final total = _printQty * parents.length;
+      setState(() { _message = '$total label(s) sent to printer.'; _ok = true; _warn = false; });
+    } else {
+      final friendly = PrinterService.friendlyPrintError(errorDetail)!;
+      setState(() { _message = 'Child roll is saved. $friendly'; _ok = false; _warn = true; });
+    }
+  }
+
+  // Clears entry fields only (used after a successful save).
   void _clear() {
     _parent1Ctrl.clear(); _parent2Ctrl.clear();
     _qtyCtrl.clear(); _lengthCtrl.clear();
@@ -910,6 +999,15 @@ class _InitialChildFormState extends State<_InitialChildForm> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _parent1Focus.requestFocus();
+    });
+  }
+
+  // Clear button: reset the form AND drop the print target + message.
+  void _clearAll() {
+    _clear();
+    setState(() {
+      _printParents = null; _printProductId = null; _printProductName = null;
+      _printQty = 0; _message = null; _warn = false;
     });
   }
 
@@ -931,7 +1029,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _stMessage(_message, _ok),
+            _stMessage(_message, _ok, warning: _warn),
             Row(children: [
               const Text('Two-Parent Roll',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
@@ -1023,22 +1121,17 @@ class _InitialChildFormState extends State<_InitialChildForm> {
             const SizedBox(height: 14),
             _stField('Notes', _notesCtrl, multiline: true),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                key: const Key('stocktakeSubmitButton'),
-                onPressed: _submitting ? null : _submit,
-                icon: _submitting
-                    ? const SizedBox(width: 20, height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.add_box, size: 24),
-                label: Text(_submitting ? 'Saving...' : 'Add to Stock + Print Labels',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1a73e8),
-                  foregroundColor: Colors.white),
-              ),
+            SavePrintClearBar(
+              saveButtonKey: const Key('stocktakeSubmitButton'),
+              onSave: _submitting ? null : _submit,
+              saving: _submitting,
+              saveLabel: 'Add to Stock',
+              saveIcon: Icons.add_box,
+              onPrint: _print,
+              printing: _printing,
+              canPrint: _printParents != null,
+              printLabel: 'Print Labels',
+              onClear: _clearAll,
             ),
           ],
         ),
@@ -1809,8 +1902,9 @@ class _PrintParentFormState extends State<_PrintParentForm> {
     setState(() => _printing = true);
     final detail = await PrinterService.printParentOnlyLabel(parentId: rollId, quantity: qty);
     setState(() => _printing = false);
-    if (detail.startsWith('ERROR')) {
-      setState(() { _message = 'Printing failed: $detail'; _ok = false; });
+    final friendly = PrinterService.friendlyPrintError(detail);
+    if (friendly != null) {
+      setState(() { _message = friendly; _ok = false; });
     } else {
       setState(() { _message = '$qty label(s) sent to printer!'; _ok = true; });
       _rollIdCtrl.clear();
@@ -1950,7 +2044,7 @@ class _PrintChildFormState extends State<_PrintChildForm> {
       final total = qty * parents.length;
       setState(() { _message = '$total label(s) sent to printer!'; _ok = true; });
     } else {
-      setState(() { _message = 'Printing failed: $errorDetail'; _ok = false; });
+      setState(() { _message = PrinterService.friendlyPrintError(errorDetail!)!; _ok = false; });
     }
   }
 
