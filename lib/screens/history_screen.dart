@@ -26,6 +26,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // Conversions state
   List<Map> _conversions = [];
 
+  // Stock Take state
+  List<Map> _stockInitial = [];   // rolls where source=="stocktake" (parent+child)
+  List<Map> _stockScans = [];     // annual count records from /stocktake/list
+  int _stockSubTab = 0;           // 0 = Initial Entries, 1 = Annual Scans
+
   bool _loading = false;
   int _selectedTab = 0;
 
@@ -50,6 +55,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final mRes = await ApiService.get('/masters/products');
     final sRes = await ApiService.get('/sales/list?limit=50');
     final cRes = await ApiService.get('/conversion/list?limit=50');
+    final siRes = await ApiService.get('/stocktake/initial');
+    final saRes = await ApiService.get('/stocktake/list?limit=200');
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -75,11 +82,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
       newConversions = List<Map>.from(cRes['conversions']);
     }
 
+    List<Map> newStockInitial = [];
+    if (siRes['rolls'] != null) {
+      newStockInitial = List<Map>.from(siRes['rolls']);
+    }
+
+    List<Map> newStockScans = [];
+    if (saRes['scans'] != null) {
+      newStockScans = List<Map>.from(saRes['scans']);
+    }
+
     setState(() {
       _productions = newProductions;
       _products = newProducts;
       _sales = newSales;
       _conversions = newConversions;
+      _stockInitial = newStockInitial;
+      _stockScans = newStockScans;
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
@@ -178,17 +197,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
             children: [
               Container(
                 color: Colors.white,
-                child: Row(
-                  children: [
-                    _tabButton('Receives', 0, Icons.download_rounded,
-                        widgetKey: const Key('receivesTab')),
-                    _tabButton('Productions', 1, Icons.precision_manufacturing,
-                        widgetKey: const Key('productionsTab')),
-                    _tabButton('Sales', 2, Icons.point_of_sale,
-                        widgetKey: const Key('salesTab')),
-                    _tabButton('Conversions', 3, Icons.swap_horiz,
-                        widgetKey: const Key('conversionsTab')),
-                  ],
+                width: double.infinity,
+                // Five icon+label tabs don't fit a handheld width, so the strip
+                // scrolls horizontally and each tab sizes to its content.
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _tabButton('Receives', 0, Icons.download_rounded,
+                          widgetKey: const Key('receivesTab')),
+                      _tabButton('Productions', 1, Icons.precision_manufacturing,
+                          widgetKey: const Key('productionsTab')),
+                      _tabButton('Sales', 2, Icons.point_of_sale,
+                          widgetKey: const Key('salesTab')),
+                      _tabButton('Conversions', 3, Icons.swap_horiz,
+                          widgetKey: const Key('conversionsTab')),
+                      _tabButton('Stock Take', 4, Icons.inventory_2,
+                          widgetKey: const Key('stockTakeTab')),
+                    ],
+                  ),
                 ),
               ),
               Expanded(
@@ -200,7 +227,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           ? _buildProductionList()
                           : _selectedTab == 2
                               ? _buildSalesList()
-                              : _buildConversionsList(),
+                              : _selectedTab == 3
+                                  ? _buildConversionsList()
+                                  : _buildStockTakeTab(),
                 ),
               ),
             ],
@@ -209,24 +238,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Widget _tabButton(String label, int index, IconData icon, {Key? widgetKey}) {
     final selected = _selectedTab == index;
-    return Expanded(
-      child: GestureDetector(
-        key: widgetKey,
-        onTap: () => setState(() => _selectedTab = index),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color:
-                    selected ? const Color(0xFF1a73e8) : Colors.transparent,
-                width: 3,
-              ),
+    return GestureDetector(
+      key: widgetKey,
+      onTap: () => setState(() => _selectedTab = index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? const Color(0xFF1a73e8) : Colors.transparent,
+              width: 3,
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
               Icon(icon,
                   size: 20,
                   color: selected ? const Color(0xFF1a73e8) : Colors.grey),
@@ -240,7 +268,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -702,6 +729,295 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Stock Take tab — two sub-sections (Initial Entries / Annual Scans) ──────
+
+  Widget _buildStockTakeTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                _stockSubButton('Initial Entries', 0),
+                _stockSubButton('Annual Scans', 1),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: _stockSubTab == 0
+              ? _buildStockInitialList()
+              : _buildStockScansList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _stockSubButton(String label, int index) {
+    final selected = _stockSubTab == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _stockSubTab = index),
+        child: Container(
+          margin: const EdgeInsets.all(4),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF1a73e8) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: selected ? Colors.white : Colors.grey[700],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Stock Take → Initial Entries (rolls, source=="stocktake") ──────────────
+
+  Widget _buildStockInitialList() {
+    if (_stockInitial.isEmpty) {
+      return const Center(
+          child: Text('No initial stock entries.',
+              style: TextStyle(fontSize: 18, color: Colors.grey)));
+    }
+
+    final sorted = List<Map>.from(_stockInitial);
+    sorted.sort((a, b) {
+      final ta = (a['received_at'] ?? a['created_at'] ?? '').toString();
+      final tb = (b['received_at'] ?? b['created_at'] ?? '').toString();
+      return tb.compareTo(ta);
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sorted.length,
+      itemBuilder: (context, i) {
+        final r = sorted[i];
+        final isChild = (r['type'] ?? '').toString() == 'child';
+        final tsRaw = (r['received_at'] ?? r['created_at'] ?? '').toString();
+        final ts = DateTime.tryParse(tsRaw);
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+        final status = (r['status'] ?? 'in_stock').toString();
+        final badgeColors = _statusBadgeColors(status);
+        final title = isChild
+            ? (r['product_id']?.toString() ?? '—')
+            : (r['roll_id']?.toString() ?? '—');
+        final subtitle = isChild
+            ? 'Qty ${r['quantity'] ?? '—'} · Parent '
+                '${(r['parent_roll_ids'] as List?)?.join(', ') ?? '—'}'
+            : [
+                r['material_type']?.toString(),
+                r['basis_weight']?.toString(),
+                r['width'] != null ? '${r['width']}"' : null,
+              ].whereType<String>().join(' · ');
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _StockInitialDetailScreen(
+                  roll: r,
+                  product: _productById(r['product_id']?.toString()),
+                ),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(title,
+                            style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace')),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: BoxDecoration(
+                          color: isChild
+                              ? Colors.purple.shade100
+                              : Colors.teal.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          isChild ? 'CHILD' : 'PARENT',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isChild
+                                  ? Colors.purple.shade800
+                                  : Colors.teal.shade800),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: BoxDecoration(
+                          color: badgeColors.$1,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          rollStatusLabel(status).toUpperCase(),
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: badgeColors.$2),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          fontSize: 13, color: Colors.black87)),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Stock Take → Annual Scans (stock_take collection) ──────────────────────
+
+  Widget _buildStockScansList() {
+    if (_stockScans.isEmpty) {
+      return const Center(
+          child: Text('No annual scans yet.',
+              style: TextStyle(fontSize: 18, color: Colors.grey)));
+    }
+
+    final sorted = List<Map>.from(_stockScans);
+    sorted.sort((a, b) {
+      final ta = (a['scanned_at'] ?? '').toString();
+      final tb = (b['scanned_at'] ?? '').toString();
+      return tb.compareTo(ta);
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sorted.length,
+      itemBuilder: (context, i) {
+        final s = sorted[i];
+        final isChild = (s['type'] ?? '').toString() == 'child';
+        final ts = DateTime.tryParse((s['scanned_at'] ?? '').toString());
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+        final existing = s['was_already_in_system'] == true;
+        final title = isChild
+            ? (s['product_id']?.toString().isNotEmpty == true
+                ? s['product_id'].toString()
+                : (s['roll_id']?.toString() ?? '—'))
+            : (s['roll_id']?.toString() ?? '—');
+        final scannedBy = s['scanned_by']?.toString() ?? '—';
+        final parents = (s['parent_roll_ids'] as List?)?.join(', ');
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _StockScanDetailScreen(scan: s),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(title,
+                            style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace')),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: existing
+                              ? Colors.green.shade100
+                              : Colors.amber.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          existing ? 'EXISTING' : 'NEW',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: existing
+                                  ? Colors.green.shade800
+                                  : Colors.amber.shade900),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                      '${isChild ? 'Child scan' : 'Parent scan'}'
+                      '${parents != null && parents.isNotEmpty ? ' · Parent $parents' : ''}',
+                      style: const TextStyle(
+                          fontSize: 13, color: Colors.black87)),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('$scannedBy · $dateLabel',
                           style: const TextStyle(
                               fontSize: 13, color: Colors.grey)),
                       const Icon(Icons.chevron_right, color: Colors.grey),
@@ -1179,6 +1495,207 @@ class _ConversionDetailScreen extends StatelessWidget {
             _readField('Converted By', conv['converted_by']?.toString()),
             _readField('Converted At', convertedAtStr),
             _readField('Conversion ID', conv['conversion_id']?.toString()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _readField(String label, String? value) {
+    final v = (value == null || value.isEmpty) ? '—' : value;
+    final lines = '\n'.allMatches(v).length + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        initialValue: v,
+        readOnly: true,
+        maxLines: lines > 1 ? lines : 1,
+        style: const TextStyle(fontSize: 16, color: Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Stock Take Initial Entry Detail (Level 2) ───────────────────────────────
+
+class _StockInitialDetailScreen extends StatelessWidget {
+  final Map roll;
+  final Map<String, dynamic> product;
+  const _StockInitialDetailScreen({required this.roll, required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final isChild = (roll['type'] ?? '').toString() == 'child';
+    final tsRaw = (roll['received_at'] ?? roll['created_at'] ?? '').toString();
+    final ts = DateTime.tryParse(tsRaw);
+    final dateStr = ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : (tsRaw.isEmpty ? '—' : tsRaw);
+    final parentList = (roll['parent_roll_ids'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          roll['roll_id']?.toString() ?? 'Stock Entry',
+          style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace'),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: isChild
+              ? [
+                  _readField('Roll ID', roll['roll_id']?.toString()),
+                  _readField('Type', 'Child'),
+                  _readField('Product ID', roll['product_id']?.toString()),
+                  _readField(
+                      'Product Name', product['product_name']?.toString()),
+                  _readField(
+                      'Material Type',
+                      (roll['material_type'] ?? product['material_type'])
+                          ?.toString()),
+                  _readField(
+                      'Basis Weight',
+                      (roll['basis_weight'] ?? product['basis_weight'])
+                          ?.toString()),
+                  _readField('Quantity', roll['quantity']?.toString()),
+                  _readField('Length (ft)', roll['length']?.toString()),
+                  _readField('Weight (lbs)', roll['weight']?.toString()),
+                  _readField('Parent Roll(s)',
+                      parentList.isEmpty ? '—' : parentList.join('\n')),
+                  _readField(
+                      'Status',
+                      roll['status'] != null
+                          ? rollStatusLabel(roll['status'].toString())
+                          : null),
+                  _readField('Notes', roll['notes']?.toString()),
+                  _readField('Created By', roll['created_by']?.toString()),
+                  _readField('Date/Time', dateStr),
+                ]
+              : [
+                  _readField('Roll ID', roll['roll_id']?.toString()),
+                  _readField('Type', 'Parent'),
+                  _readField('Vendor', roll['vendor_id']?.toString()),
+                  _readField('PO Number', roll['po_number']?.toString()),
+                  _readField('Material Type', roll['material_type']?.toString()),
+                  _readField('Basis Weight', roll['basis_weight']?.toString()),
+                  _readField('Width (in)', roll['width']?.toString()),
+                  _readField('Length (ft)', roll['length']?.toString()),
+                  _readField('Weight (lbs)', roll['weight']?.toString()),
+                  _readField(
+                      'Status',
+                      roll['status'] != null
+                          ? rollStatusLabel(roll['status'].toString())
+                          : null),
+                  _readField('Notes', roll['notes']?.toString()),
+                  _readField('Received By', roll['received_by']?.toString()),
+                  _readField('Date/Time', dateStr),
+                ],
+        ),
+      ),
+    );
+  }
+
+  Widget _readField(String label, String? value) {
+    final v = (value == null || value.isEmpty) ? '—' : value;
+    final lines = '\n'.allMatches(v).length + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        initialValue: v,
+        readOnly: true,
+        maxLines: lines > 1 ? lines : 1,
+        style: const TextStyle(fontSize: 16, color: Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Stock Take Annual Scan Detail (Level 2) ─────────────────────────────────
+
+class _StockScanDetailScreen extends StatelessWidget {
+  final Map scan;
+  const _StockScanDetailScreen({required this.scan});
+
+  @override
+  Widget build(BuildContext context) {
+    final ts = DateTime.tryParse((scan['scanned_at'] ?? '').toString());
+    final scannedStr = ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : scan['scanned_at']?.toString() ?? '—';
+    final parents = (scan['parent_roll_ids'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final existing = scan['was_already_in_system'] == true;
+    final details = scan['details'];
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          scan['roll_id']?.toString() ?? 'Annual Scan',
+          style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace'),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _readField('Roll ID', scan['roll_id']?.toString()),
+            _readField('Type', scan['type']?.toString()),
+            _readField('Product ID', scan['product_id']?.toString()),
+            _readField('Parent Roll(s)',
+                parents.isEmpty ? '—' : parents.join('\n')),
+            _readField('In System?',
+                existing ? 'Existing (already in system)' : 'New (not in system)'),
+            _readField('Scanned By', scan['scanned_by']?.toString()),
+            _readField('Scanned At', scannedStr),
+            if (details is Map && details.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text('DETAILS',
+                  style: TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...details.entries.map((e) =>
+                  _readField(e.key.toString(), e.value?.toString())),
+            ],
           ],
         ),
       ),
