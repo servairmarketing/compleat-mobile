@@ -7,6 +7,7 @@ import '../services/printer_service.dart';
 import '../services/form_state_cache.dart';
 import '../services/roll_status.dart';
 import '../services/field_focus.dart';
+import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import '../widgets/save_print_clear_bar.dart';
 import 'login_screen.dart';
@@ -924,6 +925,21 @@ class _InitialChildFormState extends State<_InitialChildForm> {
     }
     setState(() => _submitting = true);
     final parents = _twoParent ? [p1, p2] : [p1];
+    // §2.13 — shared two-parent / splice validation. Stock-take child uses
+    // requireExist:false: an UNKNOWN parent is allowed (old/leftover stock whose
+    // parent is long gone). R1 (the two parents must differ) is ALWAYS enforced;
+    // R3 (material/basis match) only fires when both parents resolve.
+    final pv = await ParentValidation.validateParentSet(parents,
+        requireExist: false);
+    if (!pv.ok) {
+      setState(() {
+        _submitting = false;
+        _message = pv.error;
+        _ok = false;
+        _warn = false;
+      });
+      return;
+    }
     final res = await ApiService.post('/stocktake/child', {
       'parent_roll_ids': parents,
       'product_id': _productId,
