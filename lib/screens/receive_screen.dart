@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
+import '../services/parent_validation.dart';
 import '../services/local_db.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
@@ -182,6 +184,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Future<void> _checkRollIdDuplicate(String rollId) async {
+    rollId = ParentValidation.normalizeRollId(rollId);
     if (rollId.isEmpty) {
       // Empty is allowed in Receive — server auto-generates.
       if (_rollIdError != null) setState(() => _rollIdError = null);
@@ -248,8 +251,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       return;
     }
     setState(() => _submitting = true);
+    final rollId = ParentValidation.normalizeRollId(_rollIdController.text);
     final payload = {
-      'roll_id': _rollIdController.text.trim().isEmpty ? null : _rollIdController.text.trim(),
+      'roll_id': rollId.isEmpty ? null : rollId,
       'vendor_id': _selectedVendor,
       'po_number': _poController.text.trim(),
       'material_type': _selectedMaterialType,
@@ -341,6 +345,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     widgetKey: const Key('rollIdField'),
                     hint: 'Auto-generated if empty',
                     focusNode: _rollIdFocusNode,
+                    inputFormatters: const [UpperCaseRollIdFormatter()],
                     keyboardType: TextInputType.emailAddress,
                     // Bug #10 — `done` (not `next`) so Flutter's built-in
                     // focus-advance can't race ahead of the duplicate check.
@@ -499,6 +504,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
        FocusNode? focusNode, bool multiline = false,
        TextInputType? keyboardType, TextInputAction? textInputAction,
        Function(String)? onSubmitted, Function(String)? onChanged,
+       List<TextInputFormatter>? inputFormatters,
        String? errorText, Key? widgetKey}) {
     return TextField(
       key: widgetKey,
@@ -511,6 +517,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       textInputAction: multiline
           ? TextInputAction.newline
           : textInputAction,
+      inputFormatters: inputFormatters,
       maxLines: multiline ? 3 : 1,
       minLines: multiline ? 1 : null,
       onSubmitted: onSubmitted,

@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
 import '../services/scan_dedupe.dart';
+import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -162,17 +163,10 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     });
   }
 
-  // Composite parser: split on the LAST hyphen.
-  ({String productId, String parentId})? _parseComposite(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    final idx = s.lastIndexOf('-');
-    if (idx <= 0 || idx >= s.length - 1) return null;
-    final pid = s.substring(0, idx).trim();
-    final parent = s.substring(idx + 1).trim();
-    if (pid.isEmpty || parent.isEmpty) return null;
-    return (productId: pid, parentId: parent);
-  }
+  // Composite parse from the shared single source (parent_validation.dart, §2.13)
+  // — split on the LAST hyphen; BOTH halves uppercased (§2.14) so lookups match.
+  ({String productId, String parentId})? _parseComposite(String raw) =>
+      ParentValidation.parseComposite(raw);
 
   void _resetScan({bool focus = true}) {
     _scanController.clear();
@@ -249,6 +243,8 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
   Future<void> _addOrIncrement(String productId, List<String> parentIds,
       {bool fromTwoParent = false}) async {
     setState(() => _checkingStock = true);
+    productId = ParentValidation.normalizeProductId(productId);
+    parentIds = parentIds.map(ParentValidation.normalizeRollId).toList();
     final qs = parentIds.join(',');
     final res = await ApiService.get(
       '/sales/stock_check?product_id=${Uri.encodeQueryComponent(productId)}'
@@ -583,6 +579,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                       autofocus: false,
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.done,
+                      inputFormatters: const [UpperCaseRollIdFormatter()],
                       style: const TextStyle(fontSize: 18),
                       decoration: InputDecoration(
                         labelText: 'Scan composite barcode',

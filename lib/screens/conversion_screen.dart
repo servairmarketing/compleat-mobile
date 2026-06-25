@@ -6,6 +6,7 @@ import '../services/local_db.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
 import '../services/scan_dedupe.dart';
+import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -118,18 +119,10 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
     });
   }
 
-  // Composite parser: split on the LAST hyphen so product IDs that
-  // contain their own hyphens (e.g. "BSR-637800-T7Q5M21182A") work.
-  ({String productId, String parentId})? _parseComposite(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    final idx = s.lastIndexOf('-');
-    if (idx <= 0 || idx >= s.length - 1) return null;
-    final pid = s.substring(0, idx).trim();
-    final parent = s.substring(idx + 1).trim();
-    if (pid.isEmpty || parent.isEmpty) return null;
-    return (productId: pid, parentId: parent);
-  }
+  // Composite parse from the shared single source (parent_validation.dart, §2.13)
+  // — split on the LAST hyphen; BOTH halves are uppercased (§2.14) so lookups match.
+  ({String productId, String parentId})? _parseComposite(String raw) =>
+      ParentValidation.parseComposite(raw);
 
   // ── Source scan handler ──────────────────────────────────────────
   // Single-parent source scan handler. Two-parent source uses
@@ -171,7 +164,8 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
   Future<void> _findSource(String productId, List<String> parentIds,
       {bool fromTwoParent = false}) async {
     setState(() => _findingSource = true);
-    final qs = parentIds.join(',');
+    productId = ParentValidation.normalizeProductId(productId);
+    final qs = parentIds.map(ParentValidation.normalizeRollId).join(',');
     final res = await ApiService.get(
       '/conversion/find_source?product_id=${Uri.encodeQueryComponent(productId)}'
       '&parent_roll_ids=${Uri.encodeQueryComponent(qs)}',
@@ -285,7 +279,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
     // Parent must be one of the source's parents (label was pre-printed
     // via Label Printing tab using source's parent IDs).
     final srcParents = (_sourceData!['parent_roll_ids'] as List?)
-            ?.map((e) => e.toString())
+            ?.map((e) => ParentValidation.normalizeRollId(e.toString()))
             .toList() ??
         const <String>[];
     if (!srcParents.contains(parent)) {
@@ -343,9 +337,10 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
 
     setState(() => _submitting = true);
     final payload = {
-      'source_roll_id': _sourceData!['doc_id'] ?? _sourceData!['roll_id'],
+      'source_roll_id': ParentValidation.normalizeRollId(
+          (_sourceData!['doc_id'] ?? _sourceData!['roll_id'])?.toString()),
       'source_status': _sourceStatus,
-      'new_product_id': _newProductId,
+      'new_product_id': ParentValidation.normalizeProductId(_newProductId),
       'quantity': _newRollsCount,
       'notes': _notesController.text.trim(),
     };
@@ -537,6 +532,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
               autofocus: false,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.done,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
               style: const TextStyle(fontSize: 18),
               enabled: !_findingSource,
               decoration: InputDecoration(
@@ -724,6 +720,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
           autofocus: false,
           keyboardType: TextInputType.emailAddress,
           textInputAction: TextInputAction.done,
+          inputFormatters: const [UpperCaseRollIdFormatter()],
           style: const TextStyle(fontSize: 18),
           decoration: InputDecoration(
             labelText: _newProductId == null

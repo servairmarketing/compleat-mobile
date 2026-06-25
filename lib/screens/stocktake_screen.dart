@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
@@ -323,6 +324,7 @@ Widget _stField(String label, TextEditingController controller,
      FocusNode? focusNode, bool multiline = false,
      TextInputType? keyboardType, TextInputAction? textInputAction,
      Function(String)? onSubmitted, Function(String)? onChanged,
+     List<TextInputFormatter>? inputFormatters,
      String? errorText, Key? widgetKey}) {
   return TextField(
     key: widgetKey,
@@ -335,6 +337,7 @@ Widget _stField(String label, TextEditingController controller,
     textInputAction: multiline
         ? TextInputAction.newline
         : textInputAction,
+    inputFormatters: inputFormatters,
     maxLines: multiline ? 3 : 1,
     minLines: multiline ? 1 : null,
     onSubmitted: onSubmitted,
@@ -491,6 +494,9 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   String? _message;
   bool _ok = false;
   bool _warn = false;
+  // §2.3 — anchors the inline banner so a validation error is scrolled into
+  // view rather than left off-screen above the operator's scroll position.
+  final GlobalKey _bannerKey = GlobalKey();
 
   // Decoupled print: the roll id saved by the last successful Save. Non-null
   // means the Print Label button is enabled and prints THIS roll. Cleared by
@@ -532,6 +538,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   }
 
   Future<void> _checkRollIdDuplicate(String rollId) async {
+    rollId = ParentValidation.normalizeRollId(rollId);
     if (rollId.isEmpty) {
       if (_rollIdError != null) setState(() => _rollIdError = null);
       _lastCheckedRollId = '';
@@ -585,7 +592,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
   }
 
   Future<void> _submit() async {
-    final rollId = _rollIdCtrl.text.trim();
+    final rollId = ParentValidation.normalizeRollId(_rollIdCtrl.text);
     final issues = <String>[];
     if (rollId.isEmpty) issues.add('Roll ID is required');
     if (_rollIdError != null) issues.add('Roll ID already exists — please correct before submitting');
@@ -633,6 +640,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       });
     } else {
       setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; _warn = false; });
+      FieldFocus.revealBanner(_bannerKey); // §2.3 — scroll backend error into view.
     }
     setState(() => _submitting = false);
   }
@@ -650,6 +658,7 @@ class _InitialParentFormState extends State<_InitialParentForm> {
       setState(() { _message = 'Label for roll $id sent to printer.'; _ok = true; _warn = false; });
     } else {
       setState(() { _message = 'Roll $id is saved. $friendly'; _ok = false; _warn = true; });
+      FieldFocus.revealBanner(_bannerKey); // §2.3 — scroll print-failure note into view.
     }
   }
 
@@ -693,10 +702,13 @@ class _InitialParentFormState extends State<_InitialParentForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _stMessage(_message, _ok, warning: _warn),
+            KeyedSubtree(
+                key: _bannerKey,
+                child: _stMessage(_message, _ok, warning: _warn)),
             _stField('Roll ID *', _rollIdCtrl, focusNode: _rollIdFocus,
                 widgetKey: const Key('stocktakeRollIdField'),
                 hint: 'Operator-entered, must be unique',
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onChanged: _onRollIdChanged,
@@ -842,6 +854,9 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   String? _message;
   bool _ok = false;
   bool _warn = false;
+  // §2.3 — anchors the inline banner so a validation error is scrolled into
+  // view rather than left off-screen above the operator's scroll position.
+  final GlobalKey _bannerKey = GlobalKey();
 
   // Decoupled print: snapshot of the last successfully-saved child entry so
   // its labels can be (re)printed independently. Non-null => Print enabled.
@@ -897,8 +912,8 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   }
 
   Future<void> _submit() async {
-    final p1 = _parent1Ctrl.text.trim();
-    final p2 = _parent2Ctrl.text.trim();
+    final p1 = ParentValidation.normalizeRollId(_parent1Ctrl.text);
+    final p2 = ParentValidation.normalizeRollId(_parent2Ctrl.text);
     final issues = <String>[];
     if (p1.isEmpty) issues.add('Parent Roll ID is required');
     if (_twoParent && p2.isEmpty) issues.add('Second Parent Roll ID is required');
@@ -938,6 +953,8 @@ class _InitialChildFormState extends State<_InitialChildForm> {
         _ok = false;
         _warn = false;
       });
+      // §2.3 — the operator is scrolled down at Submit; bring the error up.
+      FieldFocus.revealBanner(_bannerKey);
       return;
     }
     final res = await ApiService.post('/stocktake/child', {
@@ -969,6 +986,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       });
     } else {
       setState(() { _message = res['detail'] ?? 'Error submitting.'; _ok = false; _warn = false; });
+      FieldFocus.revealBanner(_bannerKey); // §2.3 — scroll backend error into view.
     }
     setState(() => _submitting = false);
   }
@@ -1001,6 +1019,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
     } else {
       final friendly = PrinterService.friendlyPrintError(errorDetail)!;
       setState(() { _message = 'Child roll is saved. $friendly'; _ok = false; _warn = true; });
+      FieldFocus.revealBanner(_bannerKey); // §2.3 — scroll print-failure note into view.
     }
   }
 
@@ -1045,7 +1064,9 @@ class _InitialChildFormState extends State<_InitialChildForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _stMessage(_message, _ok, warning: _warn),
+            KeyedSubtree(
+                key: _bannerKey,
+                child: _stMessage(_message, _ok, warning: _warn)),
             Row(children: [
               const Text('Two-Parent Roll',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
@@ -1066,12 +1087,14 @@ class _InitialChildFormState extends State<_InitialChildForm> {
             const SizedBox(height: 8),
             _stField('Parent Roll ID 1 *', _parent1Ctrl, focusNode: _parent1Focus,
                 widgetKey: const Key('stocktakeParent1Field'),
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             if (_twoParent) ...[
               const SizedBox(height: 14),
               _stField('Parent Roll ID 2 *', _parent2Ctrl,
                   widgetKey: const Key('stocktakeParent2Field'),
+                  inputFormatters: const [UpperCaseRollIdFormatter()],
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next),
             ],
@@ -1234,7 +1257,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
   }
 
   Future<void> _onScan(String value) async {
-    final rollId = value.trim();
+    final rollId = ParentValidation.normalizeRollId(value);
     if (rollId.isEmpty) return;
     setState(() { _busy = true; _message = null; });
     final res = await ApiService.get('/rolls/$rollId');
@@ -1327,6 +1350,7 @@ class _AnnualParentFormState extends State<_AnnualParentForm> {
             autofocus: true,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.done,
+            inputFormatters: const [UpperCaseRollIdFormatter()],
             onSubmitted: _onScan,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             decoration: const InputDecoration(
@@ -1564,20 +1588,16 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
     super.dispose();
   }
 
-  // Composite barcode: "ProductID-ParentID". Split at LAST "-" — product IDs
-  // contain hyphens (e.g. BRK-607800) but parent roll IDs don't, so the last
-  // hyphen separates them. Matches sales/conversion/production scanner screens.
-  ({String productId, String parentId})? _parseComposite(String raw) {
-    final v = raw.trim();
-    if (v.isEmpty) return null;
-    final i = v.lastIndexOf('-');
-    if (i <= 0 || i >= v.length - 1) return null;
-    return (productId: v.substring(0, i), parentId: v.substring(i + 1));
-  }
+  // Composite parse from the shared single source (parent_validation.dart, §2.13)
+  // — split on the LAST hyphen; BOTH halves uppercased (§2.14) so lookups match.
+  ({String productId, String parentId})? _parseComposite(String raw) =>
+      ParentValidation.parseComposite(raw);
 
   Future<void> _processPair(String productId, List<String> parents,
       {bool fromTwoParent = false}) async {
     setState(() { _busy = true; _message = null; });
+    productId = ParentValidation.normalizeProductId(productId);
+    parents = parents.map(ParentValidation.normalizeRollId).toList();
     final pCsv = parents.join(',');
     final res = await ApiService.get('/stocktake/lookup_child?product_id=$productId&parent_roll_ids=$pCsv');
     if (res['error'] == 'session_expired') {
@@ -1745,6 +1765,7 @@ class _AnnualChildFormState extends State<_AnnualChildForm> {
               autofocus: true,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.done,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
               onSubmitted: _onScan,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
@@ -1941,6 +1962,7 @@ class _PrintParentFormState extends State<_PrintParentForm> {
             _stMessage(_message, _ok),
             _stField('Roll ID *', _rollIdCtrl, focusNode: _rollIdFocus,
                 widgetKey: const Key('stocktakeRollIdField'),
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             const SizedBox(height: 14),
@@ -2103,12 +2125,14 @@ class _PrintChildFormState extends State<_PrintChildForm> {
             const SizedBox(height: 8),
             _stField('Parent Roll ID 1 *', _parent1Ctrl, focusNode: _parent1Focus,
                 widgetKey: const Key('stocktakeParent1Field'),
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next),
             if (_twoParent) ...[
               const SizedBox(height: 14),
               _stField('Parent Roll ID 2 *', _parent2Ctrl,
                   widgetKey: const Key('stocktakeParent2Field'),
+                  inputFormatters: const [UpperCaseRollIdFormatter()],
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next),
             ],

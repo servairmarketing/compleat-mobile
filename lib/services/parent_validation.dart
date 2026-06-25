@@ -16,7 +16,23 @@
 // exist without a known parent (old/consumed/leftover stock, parent long gone). R2/R2b
 // are then skipped; R1 still ALWAYS applies and R3 applies only when both parents
 // resolve. Mirrors backend validate_parent_set(require_exist=False).
+import 'package:flutter/services.dart';
 import 'api_service.dart';
+
+/// Forces an ID entry field to UPPERCASE as the operator types/scans (§2.14).
+/// Wire onto EVERY roll-id / parent / scan field so what's shown matches what's
+/// stored/looked-up — the mobile counterpart of web `IMSValidation.bindUpperCase`.
+class UpperCaseRollIdFormatter extends TextInputFormatter {
+  const UpperCaseRollIdFormatter();
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final up = newValue.text.toUpperCase();
+    if (up == newValue.text) return newValue;
+    // Preserve the caret/selection — only the case changed, not the length.
+    return newValue.copyWith(text: up);
+  }
+}
 
 /// Result of a parent-set validation: ok, or a single operator-facing message.
 class ParentValidationResult {
@@ -33,24 +49,35 @@ class ParentValidationResult {
 typedef RollLookup = Future<Map<String, dynamic>?> Function(String rollId);
 
 class ParentValidation {
+  /// Canonical form of any ID — roll IDs AND product IDs — per 02_STANDARDS §2.14:
+  /// trimmed + UPPERCASE. IDs are case-insensitive (any case = same record), so
+  /// normalize at EVERY write, lookup, and compare. This is the ONE mobile helper —
+  /// never scatter inline .toUpperCase() that can drift. Mirrors backend
+  /// normalize_roll_id() and web IMSValidation.normalizeRollId.
+  static String normalizeRollId(String? value) => (value ?? '').trim().toUpperCase();
+
+  /// Intent-revealing alias — product IDs share the same case-insensitive rule.
+  static String normalizeProductId(String? value) => normalizeRollId(value);
+
   /// Composite barcode "ProductID-ParentID" -> record, or null if malformed.
   /// Split on the LAST hyphen: product IDs contain hyphens (e.g. BRK-607800),
-  /// parent roll IDs don't. Byte-identical to the web parseComposite and the
-  /// canonical _parseComposite used across the scanner screens.
+  /// parent roll IDs don't. Byte-identical to the web parseComposite. BOTH halves
+  /// are normalized to uppercase — they are IDs and must match storage/lookups.
   static ({String productId, String parentId})? parseComposite(String raw) {
     final v = raw.trim();
     if (v.isEmpty) return null;
     final i = v.lastIndexOf('-');
     if (i <= 0 || i >= v.length - 1) return null;
-    final pid = v.substring(0, i).trim();
-    final parent = v.substring(i + 1).trim();
+    final pid = normalizeProductId(v.substring(0, i));
+    final parent = normalizeRollId(v.substring(i + 1));
     if (pid.isEmpty || parent.isEmpty) return null;
     return (productId: pid, parentId: parent);
   }
 
   /// Default roll lookup via GET /rolls/{id}. Returns null when not found.
+  /// Normalizes the ID so a miscased reference resolves to the stored roll.
   static Future<Map<String, dynamic>?> defaultRollLookup(String rollId) async {
-    final res = await ApiService.get('/rolls/$rollId');
+    final res = await ApiService.get('/rolls/${normalizeRollId(rollId)}');
     if (res['roll'] != null) return Map<String, dynamic>.from(res['roll']);
     if (res['roll_id'] != null) return Map<String, dynamic>.from(res);
     return null;
@@ -64,8 +91,11 @@ class ParentValidation {
     bool requireExist = true,
   }) async {
     final lookup = lookupFn ?? defaultRollLookup;
+    // Canonicalize so R1 distinct, the lookup, and R3 compare are case-insensitive
+    // — a parent created "T7Q5M21182A" referenced "t7q5m21182a" resolves to the
+    // same roll instead of slotting in as unknown (which would skip R3).
     final ids = parentIds
-        .map((p) => p.trim())
+        .map(normalizeRollId)
         .where((p) => p.isNotEmpty)
         .toList();
     if (ids.isEmpty) {

@@ -9,6 +9,7 @@ import '../services/printer_service.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
 import '../services/scan_dedupe.dart';
+import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
 
@@ -265,7 +266,7 @@ class _ProductionScreenState extends State<ProductionScreen>
   }
 
   Future<Map<String, dynamic>?> _fetchParentRoll(String rollId) async {
-    final res = await ApiService.get('/rolls/${rollId}');
+    final res = await ApiService.get('/rolls/${ParentValidation.normalizeRollId(rollId)}');
     if (res['roll'] != null) return Map<String, dynamic>.from(res['roll']);
     if (res['roll_id'] != null) return Map<String, dynamic>.from(res);
     return null;
@@ -511,18 +512,10 @@ class _ProductionScreenState extends State<ProductionScreen>
 
   // ── Roll Production ────────────────────────────────────────────
 
-  // Composite parser: split on the LAST hyphen so product IDs that contain
-  // their own hyphens (e.g. "BSR-637800-T7Q5M21182A") parse correctly.
-  ({String productId, String parentId})? _parseComposite(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    final idx = s.lastIndexOf('-');
-    if (idx <= 0 || idx >= s.length - 1) return null;
-    final pid = s.substring(0, idx).trim();
-    final parent = s.substring(idx + 1).trim();
-    if (pid.isEmpty || parent.isEmpty) return null;
-    return (productId: pid, parentId: parent);
-  }
+  // Composite parse from the shared single source (parent_validation.dart, §2.13)
+  // — split on the LAST hyphen; BOTH halves are uppercased (§2.14) so lookups match.
+  ({String productId, String parentId})? _parseComposite(String raw) =>
+      ParentValidation.parseComposite(raw);
 
   void _commitScan(String productId, String productName, {bool refocusScan = true}) {
     setState(() {
@@ -742,12 +735,13 @@ class _ProductionScreenState extends State<ProductionScreen>
 
     setState(() => _submitting = true);
 
-    final parentRollIds = batchTwoParent ? [p1, p2] : [p1];
+    final parentRollIds = (batchTwoParent ? [p1, p2] : [p1])
+        .map(ParentValidation.normalizeRollId).toList();
     final parentStatuses = batchTwoParent
         ? [_selectedStatus1, _selectedStatus2]
         : [_selectedStatus1];
     final items = _scannedItems.entries.map((e) => {
-      'product_id': e.key,
+      'product_id': ParentValidation.normalizeProductId(e.key),
       'quantity': e.value['count'],
     }).toList();
 
@@ -877,6 +871,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           const SizedBox(height: 12),
           _buildTextField('Parent Roll ID 1 *', _lpParent1,
               focusNode: _lpParent1Focus,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
@@ -907,6 +902,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             const SizedBox(height: 12),
             _buildTextField('Parent Roll ID 2 *', _lpParent2,
                 focusNode: _lpParent2Focus,
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
@@ -1131,6 +1127,7 @@ class _ProductionScreenState extends State<ProductionScreen>
           _buildTextField('Parent Roll ID 1 *', _rpParent1,
               widgetKey: const Key('parent1Field'),
               focusNode: _rpParent1Focus,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) async {
@@ -1162,6 +1159,7 @@ class _ProductionScreenState extends State<ProductionScreen>
             _buildTextField('Parent Roll ID 2 *', _rpParent2,
                 widgetKey: const Key('parent2Field'),
                 focusNode: _rpParent2Focus,
+                inputFormatters: const [UpperCaseRollIdFormatter()],
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) async {
@@ -1262,6 +1260,7 @@ class _ProductionScreenState extends State<ProductionScreen>
               autofocus: false,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.done,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
               style: const TextStyle(fontSize: 18),
               decoration: const InputDecoration(
                 labelText: 'Scan composite barcode',
@@ -1406,6 +1405,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       {bool numeric = false, bool autofocus = false, Function(String)? onSubmitted,
        FocusNode? focusNode, TextInputType? keyboardType,
        TextInputAction? textInputAction, bool multiline = false,
+       List<TextInputFormatter>? inputFormatters,
        Key? widgetKey}) {
     return TextField(
       key: widgetKey,
@@ -1418,6 +1418,7 @@ class _ProductionScreenState extends State<ProductionScreen>
       textInputAction: multiline
           ? TextInputAction.newline
           : textInputAction,
+      inputFormatters: inputFormatters,
       maxLines: multiline ? 3 : 1,
       minLines: multiline ? 1 : null,
       style: const TextStyle(fontSize: 18),

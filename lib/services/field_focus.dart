@@ -70,6 +70,32 @@ class FieldFocus {
     });
   }
 
+  /// §2.3 — inline validation banners MUST be scrolled into view.
+  ///
+  /// When a validation error (or any inline banner) is rendered at the TOP of a
+  /// scrollable form, the operator has usually scrolled past it — they are down
+  /// at the Submit button when validation fails — so the banner appears
+  /// off-screen ABOVE the current position and the action looks like it
+  /// silently did nothing. After showing the banner, call this with a
+  /// [GlobalKey] attached to the banner widget to scroll it back into view
+  /// (aligned to the top of the viewport).
+  ///
+  /// Safe to call inside the same `setState` turn that sets the message: the
+  /// scroll runs in a post-frame callback, after the banner has been laid out.
+  /// No-ops if the banner is not currently mounted.
+  static void revealBanner(GlobalKey bannerKey) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = bannerKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.0,
+        duration: _scrollDuration,
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   /// Bug #30 (revised) — wired into every DropdownSearch via
   /// `DropdownSearch.onBeforePopupOpening`, which `_selectSearchMode` AWAITS
   /// before it positions and opens the popup. That await is the whole fix:

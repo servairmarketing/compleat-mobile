@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/field_focus.dart';
 import '../services/scan_dedupe.dart';
+import '../services/parent_validation.dart';
 
 /// Bug #15 — two-parent scans use two separate, always-visible scan fields.
 ///
@@ -159,6 +160,7 @@ class _TwoParentScanFieldsState extends State<TwoParentScanFields> {
       autofocus: false,
       keyboardType: TextInputType.emailAddress,
       textInputAction: TextInputAction.done,
+      inputFormatters: const [UpperCaseRollIdFormatter()],
       style: const TextStyle(fontSize: 18),
       decoration: InputDecoration(
         labelText: label,
