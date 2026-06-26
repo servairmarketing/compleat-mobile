@@ -46,6 +46,49 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_profile');
+    await prefs.remove('effective_permissions');
+  }
+
+  // ── Permissions (UX gating only — the backend is the real gate) ──
+  // Mirrors the web's effectivePermissions cache: a flat { "entity:action":
+  // bool } map fetched best-effort at login. Admins bypass. If the map didn't
+  // load (e.g. the effective-permissions endpoint needs users:view, which a
+  // warehouse user lacks), hasPermission returns false for non-admins — the
+  // same known frontend-enforcement gap as web (backlog #17). NEVER rely on
+  // this for security; it only decides whether to SHOW an affordance.
+  static Future<void> savePermissions(Map<String, dynamic> perms) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('effective_permissions', jsonEncode(perms));
+  }
+
+  static Future<Map<String, dynamic>> getPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString('effective_permissions');
+    if (str == null) return {};
+    try {
+      final d = jsonDecode(str);
+      return d is Map<String, dynamic> ? d : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  // Best-effort: fetch + cache the logged-in user's effective permissions.
+  // Non-fatal — login proceeds even if this fails (returns false).
+  static Future<bool> refreshPermissions(String uid) async {
+    final res = await get('/users/$uid/effective-permissions');
+    if (res['permissions'] is Map) {
+      await savePermissions(Map<String, dynamic>.from(res['permissions']));
+      return true;
+    }
+    return false;
+  }
+
+  static Future<bool> hasPermission(String entity, String action) async {
+    final profile = await getUserProfile();
+    if (profile != null && profile['role'] == 'admin') return true;
+    final perms = await getPermissions();
+    return perms['$entity:$action'] == true;
   }
 
   // Bug #31 — a 5xx from Cloud Run can return an HTML / plain-text error page

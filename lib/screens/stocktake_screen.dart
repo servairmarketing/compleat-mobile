@@ -20,7 +20,7 @@ class StocktakeScreen extends StatefulWidget {
   State<StocktakeScreen> createState() => _StocktakeScreenState();
 }
 
-enum _StMode { initial, annual, printLabels }
+enum _StMode { initial, printLabels }
 enum _StSub { parent, child }
 
 class _StocktakeScreenState extends State<StocktakeScreen> {
@@ -115,7 +115,6 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     if (_mode == null) return 'Stock Take';
     final m = switch (_mode!) {
       _StMode.initial => 'Initial Stock Entry',
-      _StMode.annual => 'Annual Stock Take',
       _StMode.printLabels => 'Print Labels',
     };
     if (_sub == null) return m;
@@ -176,17 +175,6 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     if (_mode == _StMode.initial && _sub == _StSub.child) {
       return _InitialChildForm(products: _products);
     }
-    if (_mode == _StMode.annual && _sub == _StSub.parent) {
-      return _AnnualParentForm(
-        vendors: _vendors,
-        materialTypes: _materialTypes,
-        basisWeights: _basisWeights,
-        widths: _widths,
-      );
-    }
-    if (_mode == _StMode.annual && _sub == _StSub.child) {
-      return _AnnualChildForm(products: _products);
-    }
     if (_mode == _StMode.printLabels && _sub == _StSub.parent) {
       return const _PrintParentForm();
     }
@@ -216,9 +204,19 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             key: const Key('annualStocktakeMode'),
             icon: Icons.fact_check_rounded,
             color: const Color(0xFF00897B),
-            label: 'Annual Stock Take',
-            description: 'Record annual count. Writes to stock-take log only.',
-            onTap: () => setState(() => _mode = _StMode.annual),
+            label: 'Annual Count (Batches)',
+            description: 'Scan into a named batch. Save & exit, resume, or join others.',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => StocktakeBatchListScreen(
+                  vendors: _vendors,
+                  materialTypes: _materialTypes,
+                  basisWeights: _basisWeights,
+                  widths: _widths,
+                ),
+              ),
+            ),
           ),
           _ModeCard(
             key: const Key('printLabelsMode'),
@@ -1179,713 +1177,6 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   }
 }
 
-// ─── Mode 2a: Annual Parent Stock Take ──────────────────────────────
-class _AnnualParentForm extends StatefulWidget {
-  final List<Map> vendors;
-  final List<String> materialTypes;
-  final List<String> basisWeights;
-  final List<String> widths;
-  const _AnnualParentForm({
-    required this.vendors, required this.materialTypes,
-    required this.basisWeights, required this.widths,
-  });
-  @override
-  State<_AnnualParentForm> createState() => _AnnualParentFormState();
-}
-
-class _AnnualParentFormState extends State<_AnnualParentForm> {
-  final _scanCtrl = TextEditingController();
-  final _scanFocus = FocusNode();
-  bool _busy = false;
-  String? _message;
-  bool _ok = false;
-
-  // Inline-form fields (shown when scanned roll does not exist)
-  bool _showInlineForm = false;
-  String _pendingRollId = '';
-  final _poCtrl = TextEditingController();
-  final _lengthCtrl = TextEditingController();
-  final _weightCtrl = TextEditingController();
-  final _notesCtrl = TextEditingController();
-  String? _vendor, _materialType, _basisWeight, _width;
-  bool _submitting = false;
-
-  // Bug #14 — in-memory form-state cache key for this sub-form.
-  static const _cacheKey = 'stocktake_annual_parent';
-
-  @override
-  void initState() {
-    super.initState();
-    // Bug #14 — restore any in-progress inline entry preserved on nav-away.
-    final snap = FormStateCache.read(_cacheKey);
-    if (snap != null) {
-      _showInlineForm = snap['showInlineForm'] ?? false;
-      _pendingRollId = snap['pendingRollId'] ?? '';
-      _poCtrl.text = snap['po'] ?? '';
-      _lengthCtrl.text = snap['length'] ?? '';
-      _weightCtrl.text = snap['weight'] ?? '';
-      _notesCtrl.text = snap['notes'] ?? '';
-      _vendor = snap['vendor'];
-      _materialType = snap['materialType'];
-      _basisWeight = snap['basisWeight'];
-      _width = snap['width'];
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scanFocus.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    // Bug #14 — snapshot current entry before disposing controllers.
-    FormStateCache.write(_cacheKey, {
-      'showInlineForm': _showInlineForm,
-      'pendingRollId': _pendingRollId,
-      'po': _poCtrl.text,
-      'length': _lengthCtrl.text,
-      'weight': _weightCtrl.text,
-      'notes': _notesCtrl.text,
-      'vendor': _vendor,
-      'materialType': _materialType,
-      'basisWeight': _basisWeight,
-      'width': _width,
-    });
-    _scanCtrl.dispose(); _scanFocus.dispose();
-    _poCtrl.dispose(); _lengthCtrl.dispose();
-    _weightCtrl.dispose(); _notesCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _onScan(String value) async {
-    final rollId = ParentValidation.normalizeRollId(value);
-    if (rollId.isEmpty) return;
-    setState(() { _busy = true; _message = null; });
-    final res = await ApiService.get('/rolls/$rollId');
-    final exists = res['roll'] != null && (res['roll']['type'] == 'parent');
-    if (exists) {
-      // Record scan with was_already_in_system=true
-      final scanRes = await ApiService.post('/stocktake/scan', {
-        'type': 'parent',
-        'roll_id': rollId,
-        'was_already_in_system': true,
-      });
-      if (scanRes['success'] == true) {
-        setState(() { _message = '✓ Recorded $rollId'; _ok = true; _busy = false; });
-        _scanCtrl.clear();
-        _scanFocus.requestFocus();
-      } else {
-        setState(() { _message = scanRes['detail'] ?? 'Scan failed.'; _ok = false; _busy = false; });
-      }
-    } else {
-      // Open inline form for new parent
-      setState(() {
-        _busy = false;
-        _showInlineForm = true;
-        _pendingRollId = rollId;
-        _message = 'Roll $rollId not found — fill in details below.';
-        _ok = false;
-      });
-      _scanCtrl.clear();
-    }
-  }
-
-  Future<void> _submitInline() async {
-    if (_vendor == null || _materialType == null || _basisWeight == null || _width == null) {
-      setState(() { _message = 'Vendor, Material Type, Basis Weight and Width are required.'; _ok = false; }); return;
-    }
-    if (_lengthCtrl.text.trim().isEmpty || _weightCtrl.text.trim().isEmpty) {
-      setState(() { _message = 'Length and Weight are required.'; _ok = false; }); return;
-    }
-    setState(() => _submitting = true);
-    final parentRes = await ApiService.post('/stocktake/parent', {
-      'roll_id': _pendingRollId,
-      'vendor_id': _vendor,
-      'po_number': _poCtrl.text.trim(),
-      'material_type': _materialType,
-      'basis_weight': _basisWeight,
-      'width': double.tryParse(_width ?? '') ?? 0,
-      'length': double.tryParse(_lengthCtrl.text) ?? 0,
-      'weight': double.tryParse(_weightCtrl.text) ?? 0,
-      'notes': _notesCtrl.text.trim(),
-    });
-    if (parentRes['success'] == true) {
-      await ApiService.post('/stocktake/scan', {
-        'type': 'parent',
-        'roll_id': _pendingRollId,
-        'was_already_in_system': false,
-      });
-      setState(() {
-        _message = 'Parent $_pendingRollId added & scan recorded!';
-        _ok = true;
-        _showInlineForm = false;
-        _pendingRollId = '';
-      });
-      _poCtrl.clear(); _lengthCtrl.clear();
-      _weightCtrl.clear(); _notesCtrl.clear();
-      _vendor = null; _materialType = null;
-      _basisWeight = null; _width = null;
-      _scanFocus.requestFocus();
-    } else {
-      setState(() { _message = parentRes['detail'] ?? 'Submit failed.'; _ok = false; });
-    }
-    setState(() => _submitting = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showInlineForm) return _buildInlineForm();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _stMessage(_message, _ok),
-          const Text('Scan Parent Roll ID barcode',
-              style: TextStyle(fontSize: 14, color: Colors.black54)),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('stocktakeScanField'),
-            controller: _scanCtrl,
-            focusNode: _scanFocus,
-            autofocus: true,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            inputFormatters: const [UpperCaseRollIdFormatter()],
-            onSubmitted: _onScan,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-            decoration: const InputDecoration(
-              labelText: 'Parent Roll ID',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
-              prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (_busy) const LinearProgressIndicator(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInlineForm() {
-    final vendorItems = widget.vendors.map((v) => '${v['vendor_id']} — ${v['vendor_name']}').toList();
-    final selectedVendor = _vendor != null
-        ? (widget.vendors.where((v) => v['vendor_id']?.toString() == _vendor).isNotEmpty
-            ? '$_vendor — ${widget.vendors.firstWhere((v) => v['vendor_id']?.toString() == _vendor)['vendor_name']}'
-            : null)
-        : null;
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _stMessage(_message, _ok),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue),
-              ),
-              child: Text('New parent: $_pendingRollId',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 14),
-            Builder(builder: (ctx) => DropdownSearch<String>(
-              // Bug #30 — scroll the field up so the popup opens below it.
-              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
-              items: vendorItems,
-              selectedItem: selectedVendor,
-              dropdownDecoratorProps: const DropDownDecoratorProps(
-                dropdownSearchDecoration: InputDecoration(
-                  labelText: 'Vendor *',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-                ),
-              ),
-              popupProps: PopupProps.menu(
-                showSearchBox: true,
-                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
-              ),
-              onChanged: (val) {
-                FocusManager.instance.primaryFocus?.unfocus();
-                if (val == null) { setState(() => _vendor = null); return; }
-                setState(() => _vendor = val.split(' — ')[0]);
-              },
-            )),
-            const SizedBox(height: 14),
-            _stField('PO Number', _poCtrl),
-            const SizedBox(height: 14),
-            _stSimpleDropdown(
-              context: context,
-              label: 'Material Type *',
-              items: widget.materialTypes,
-              value: _materialType,
-              enabled: _basisWeight != 'Crepe' || _materialType == 'Crepe',
-              onChanged: (v) {
-                setState(() {
-                  _materialType = v;
-                  if (v == 'Crepe') _basisWeight = 'Crepe';
-                  else if (_basisWeight == 'Crepe') _basisWeight = null;
-                });
-              },
-            ),
-            const SizedBox(height: 14),
-            _stSimpleDropdown(
-              context: context,
-              label: 'Basis Weight *',
-              items: widget.basisWeights,
-              value: _basisWeight,
-              enabled: _materialType != 'Crepe' || _basisWeight == 'Crepe',
-              onChanged: (v) {
-                setState(() {
-                  _basisWeight = v;
-                  if (v == 'Crepe') _materialType = 'Crepe';
-                  else if (_materialType == 'Crepe') _materialType = null;
-                });
-              },
-            ),
-            const SizedBox(height: 14),
-            Row(children: [
-              Expanded(
-                child: _stSimpleDropdown(
-                  context: context,
-                  label: 'Width (in) *',
-                  items: widget.widths,
-                  value: _width,
-                  onChanged: (v) => setState(() => _width = v),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _stField('Length (ft) *', _lengthCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.next),
-              ),
-            ]),
-            const SizedBox(height: 14),
-            _stField('Weight (lbs) *', _weightCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                textInputAction: TextInputAction.done),
-            const SizedBox(height: 14),
-            _stField('Notes', _notesCtrl, multiline: true),
-            const SizedBox(height: 24),
-            Row(children: [
-              Expanded(
-                child: SizedBox(
-                  height: 56,
-                  child: ElevatedButton.icon(
-                    key: const Key('stocktakeSubmitButton'),
-                    onPressed: _submitting ? null : _submitInline,
-                    icon: _submitting
-                        ? const SizedBox(width: 20, height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save),
-                    label: Text(_submitting ? 'Saving...' : 'Save & Record',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00897B),
-                      foregroundColor: Colors.white),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                height: 56,
-                child: OutlinedButton(
-                  onPressed: () => setState(() {
-                    _showInlineForm = false;
-                    _pendingRollId = '';
-                    _message = null;
-                  }),
-                  child: const Text('Cancel', style: TextStyle(fontSize: 18)),
-                ),
-              ),
-            ]),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Mode 2b: Annual Child Stock Take ──────────────────────────────
-class _AnnualChildForm extends StatefulWidget {
-  final List<Map> products;
-  const _AnnualChildForm({required this.products});
-  @override
-  State<_AnnualChildForm> createState() => _AnnualChildFormState();
-}
-
-class _AnnualChildFormState extends State<_AnnualChildForm> {
-  final _scanCtrl = TextEditingController();
-  final _scanFocus = FocusNode();
-  bool _twoParent = false;
-  // Pending pair when in two-parent mode and one composite has been scanned
-  String? _pendingProductId;
-  String? _pendingParent1;
-
-  bool _busy = false;
-  String? _message;
-  bool _ok = false;
-
-  // Inline form fields (when scanned child does not exist)
-  bool _showInlineForm = false;
-  String _pendingProductForForm = '';
-  List<String> _pendingParentsForForm = [];
-
-  final _qtyCtrl = TextEditingController();
-  final _lengthCtrl = TextEditingController();
-  final _weightCtrl = TextEditingController();
-  final _notesCtrl = TextEditingController();
-  bool _submitting = false;
-
-  // Bug #14 — in-memory form-state cache key for this sub-form.
-  static const _cacheKey = 'stocktake_annual_child';
-
-  @override
-  void initState() {
-    super.initState();
-    // Bug #14 — restore any in-progress inline entry preserved on nav-away.
-    final snap = FormStateCache.read(_cacheKey);
-    if (snap != null) {
-      _twoParent = snap['twoParent'] ?? false;
-      _showInlineForm = snap['showInlineForm'] ?? false;
-      _pendingProductForForm = snap['pendingProductForForm'] ?? '';
-      if (snap['pendingParentsForForm'] is List) {
-        _pendingParentsForForm =
-            (snap['pendingParentsForForm'] as List).cast<String>();
-      }
-      _qtyCtrl.text = snap['qty'] ?? '';
-      _lengthCtrl.text = snap['length'] ?? '';
-      _weightCtrl.text = snap['weight'] ?? '';
-      _notesCtrl.text = snap['notes'] ?? '';
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scanFocus.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    // Bug #14 — snapshot current entry before disposing controllers.
-    FormStateCache.write(_cacheKey, {
-      'twoParent': _twoParent,
-      'showInlineForm': _showInlineForm,
-      'pendingProductForForm': _pendingProductForForm,
-      'pendingParentsForForm': List<String>.from(_pendingParentsForForm),
-      'qty': _qtyCtrl.text,
-      'length': _lengthCtrl.text,
-      'weight': _weightCtrl.text,
-      'notes': _notesCtrl.text,
-    });
-    _scanCtrl.dispose(); _scanFocus.dispose();
-    _qtyCtrl.dispose(); _lengthCtrl.dispose();
-    _weightCtrl.dispose(); _notesCtrl.dispose();
-    super.dispose();
-  }
-
-  // Composite parse from the shared single source (parent_validation.dart, §2.13)
-  // — split on the LAST hyphen; BOTH halves uppercased (§2.14) so lookups match.
-  ({String productId, String parentId})? _parseComposite(String raw) =>
-      ParentValidation.parseComposite(raw);
-
-  Future<void> _processPair(String productId, List<String> parents,
-      {bool fromTwoParent = false}) async {
-    setState(() { _busy = true; _message = null; });
-    productId = ParentValidation.normalizeProductId(productId);
-    parents = parents.map(ParentValidation.normalizeRollId).toList();
-    final pCsv = parents.join(',');
-    final res = await ApiService.get('/stocktake/lookup_child?product_id=$productId&parent_roll_ids=$pCsv');
-    if (res['error'] == 'session_expired') {
-      if (mounted) Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()));
-      return;
-    }
-    final found = res['found'] == true;
-    if (found) {
-      final scanRes = await ApiService.post('/stocktake/scan', {
-        'type': 'child',
-        'product_id': productId,
-        'parent_roll_ids': parents,
-        'was_already_in_system': true,
-      });
-      if (scanRes['success'] == true) {
-        setState(() {
-          _message = '✓ Recorded child $productId from ${parents.join(' + ')}';
-          _ok = true; _busy = false;
-        });
-        _scanCtrl.clear();
-        // In two-parent mode the TwoParentScanFields widget owns + restores
-        // focus, so don't yank it back to the single scan field.
-        if (!fromTwoParent) _scanFocus.requestFocus();
-      } else {
-        setState(() {
-          _message = scanRes['detail'] ?? 'Scan failed.';
-          _ok = false; _busy = false;
-        });
-      }
-    } else {
-      setState(() {
-        _busy = false;
-        _showInlineForm = true;
-        _pendingProductForForm = productId;
-        _pendingParentsForForm = parents;
-        _message = 'Child $productId not found — fill in details below.';
-        _ok = false;
-      });
-      _scanCtrl.clear();
-    }
-  }
-
-  // Single-parent scan handler. Two-parent mode uses _onTwoParentPair via the
-  // shared TwoParentScanFields widget, so this only runs in single mode.
-  Future<void> _onScan(String value) async {
-    final parsed = _parseComposite(value);
-    if (parsed == null) {
-      setState(() { _message = 'Invalid composite — expected "ProductID-ParentID".'; _ok = false; });
-      _scanCtrl.clear();
-      return;
-    }
-    await _processPair(parsed.productId, [parsed.parentId]);
-  }
-
-  // Bug #15 — two-parent pair handler. Receives the two raw composite scans
-  // from the shared TwoParentScanFields widget.
-  Future<void> _onTwoParentPair(String scan1, String scan2) async {
-    final p1 = _parseComposite(scan1);
-    final p2 = _parseComposite(scan2);
-    if (p1 == null || p2 == null) {
-      setState(() { _message = 'Invalid composite — expected "ProductID-ParentID".'; _ok = false; });
-      return;
-    }
-    if (p1.productId != p2.productId) {
-      setState(() {
-        _message = 'Product ID mismatch between the two labels — both must be the same product.';
-        _ok = false;
-      });
-      return;
-    }
-    if (p1.parentId == p2.parentId) {
-      setState(() {
-        _message = 'Both labels are from the same parent. Scan one label per parent.';
-        _ok = false;
-      });
-      return;
-    }
-    await _processPair(p1.productId, [p1.parentId, p2.parentId], fromTwoParent: true);
-  }
-
-  Future<void> _submitInline() async {
-    final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
-    if (qty < 1) {
-      setState(() { _message = 'Quantity must be 1 or more.'; _ok = false; }); return;
-    }
-    if (_lengthCtrl.text.trim().isEmpty || _weightCtrl.text.trim().isEmpty) {
-      setState(() { _message = 'Length and Weight are required.'; _ok = false; }); return;
-    }
-    setState(() => _submitting = true);
-    final childRes = await ApiService.post('/stocktake/child', {
-      'parent_roll_ids': _pendingParentsForForm,
-      'product_id': _pendingProductForForm,
-      'quantity': qty,
-      'length': double.tryParse(_lengthCtrl.text) ?? 0,
-      'weight': double.tryParse(_weightCtrl.text) ?? 0,
-      'notes': _notesCtrl.text.trim(),
-    });
-    if (childRes['success'] == true) {
-      await ApiService.post('/stocktake/scan', {
-        'type': 'child',
-        'product_id': _pendingProductForForm,
-        'parent_roll_ids': _pendingParentsForForm,
-        'was_already_in_system': false,
-      });
-      setState(() {
-        _message = 'Child $_pendingProductForForm added & scan recorded!';
-        _ok = true;
-        _showInlineForm = false;
-        _pendingProductForForm = '';
-        _pendingParentsForForm = [];
-      });
-      _qtyCtrl.clear(); _lengthCtrl.clear();
-      _weightCtrl.clear(); _notesCtrl.clear();
-      _scanFocus.requestFocus();
-    } else {
-      setState(() { _message = childRes['detail'] ?? 'Submit failed.'; _ok = false; });
-    }
-    setState(() => _submitting = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showInlineForm) return _buildInlineForm();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _stMessage(_message, _ok),
-          Row(children: [
-            const Text('Two-Parent Roll',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            Switch(
-              key: const Key('stocktakeTwoParentToggle'),
-              value: _twoParent,
-              onChanged: (v) => setState(() {
-                _twoParent = v;
-                _pendingProductId = null;
-                _pendingParent1 = null;
-              }),
-            ),
-          ]),
-          const SizedBox(height: 8),
-          Text(_twoParent
-              ? 'Scan BOTH composite labels (one per parent) for each child roll.'
-              : 'Scan composite barcode (ProductID-ParentID).',
-              style: const TextStyle(fontSize: 14, color: Colors.black54)),
-          const SizedBox(height: 8),
-          // Bug #15 — two-parent mode shows TWO always-visible scan fields via
-          // the shared widget; single-parent keeps the one composite field.
-          if (_twoParent)
-            TwoParentScanFields(
-              key: const Key('stocktakeAnnualChildTwoParentScan'),
-              firstFieldFocusNode: _scanFocus,
-              enabled: !_busy,
-              onPair: _onTwoParentPair,
-            )
-          else
-            TextField(
-              key: const Key('stocktakeScanField'),
-              controller: _scanCtrl,
-              focusNode: _scanFocus,
-              autofocus: true,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.done,
-              inputFormatters: const [UpperCaseRollIdFormatter()],
-              onSubmitted: _onScan,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
-                labelText: 'Composite Barcode',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 14),
-                prefixIcon: Icon(Icons.qr_code_scanner, size: 28),
-              ),
-            ),
-          const SizedBox(height: 8),
-          if (_busy) const LinearProgressIndicator(),
-          if (_pendingProductId != null) Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.amber[50],
-                border: Border.all(color: Colors.amber),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text('Pending pair: $_pendingProductId / $_pendingParent1',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInlineForm() {
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _stMessage(_message, _ok),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Product: $_pendingProductForForm',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text('Parents: ${_pendingParentsForForm.join(' + ')}',
-                      style: const TextStyle(fontSize: 16)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(children: [
-              Expanded(
-                child: _stField('Quantity *', _qtyCtrl,
-                    widgetKey: const Key('stocktakeQtyField'),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _stField('Length (ft) *', _lengthCtrl,
-                    widgetKey: const Key('stocktakeLengthField'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.next),
-              ),
-            ]),
-            const SizedBox(height: 14),
-            _stField('Weight (lbs) *', _weightCtrl,
-                widgetKey: const Key('stocktakeWeightField'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                textInputAction: TextInputAction.done),
-            const SizedBox(height: 14),
-            _stField('Notes', _notesCtrl, multiline: true),
-            const SizedBox(height: 24),
-            Row(children: [
-              Expanded(
-                child: SizedBox(
-                  height: 56,
-                  child: ElevatedButton.icon(
-                    key: const Key('stocktakeSubmitButton'),
-                    onPressed: _submitting ? null : _submitInline,
-                    icon: _submitting
-                        ? const SizedBox(width: 20, height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save),
-                    label: Text(_submitting ? 'Saving...' : 'Save & Record',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00897B),
-                      foregroundColor: Colors.white),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                height: 56,
-                child: OutlinedButton(
-                  onPressed: () => setState(() {
-                    _showInlineForm = false;
-                    _pendingProductForForm = '';
-                    _pendingParentsForForm = [];
-                    _message = null;
-                  }),
-                  child: const Text('Cancel', style: TextStyle(fontSize: 18)),
-                ),
-              ),
-            ]),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Mode 3a: Print Parent Label ────────────────────────────────────
 class _PrintParentForm extends StatefulWidget {
   const _PrintParentForm();
@@ -2194,5 +1485,912 @@ class _PrintChildFormState extends State<_PrintChildForm> {
         ),
       ),
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Annual Count — Batch System (Stage 1-4 backend, /api/stocktake/*)
+//  Replaces the old free-scan Annual flow. The handheld lets a user create
+//  or join a named batch and scan into it (save/exit + resume). Freeze and
+//  reconciliation are web-only. Scan resolution is POST-first: the backend
+//  decides known-vs-unknown (status-agnostic); a "not found in system"
+//  response opens the inline Initial Stock Entry form, which resubmits as
+//  the unknown path with an initial_entry payload (backend creates the roll
+//  AND records the scan in one call). Core actions are gated server-side by
+//  stocktake_batch:execute; corrections (edit/delete) are web-only.
+// ═══════════════════════════════════════════════════════════════════════
+
+class StocktakeBatchListScreen extends StatefulWidget {
+  final List<Map> vendors;
+  final List<String> materialTypes;
+  final List<String> basisWeights;
+  final List<String> widths;
+  const StocktakeBatchListScreen({
+    super.key,
+    required this.vendors,
+    required this.materialTypes,
+    required this.basisWeights,
+    required this.widths,
+  });
+  @override
+  State<StocktakeBatchListScreen> createState() => _StocktakeBatchListScreenState();
+}
+
+class _StocktakeBatchListScreenState extends State<StocktakeBatchListScreen> {
+  bool _loading = true;
+  String? _error;
+  List<Map> _open = [];
+  List<Map> _paused = [];
+  bool _creating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() { _loading = true; _error = null; });
+    final res = await ApiService.get('/api/stocktake/batches');
+    if (res['error'] == 'session_expired') {
+      if (mounted) Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()));
+      return;
+    }
+    if (res['batches'] is List) {
+      final list = List<Map>.from(res['batches']);
+      list.sort((a, b) => (b['created_at'] ?? '').toString()
+          .compareTo((a['created_at'] ?? '').toString()));
+      _open = list.where((b) => b['state'] == 'open').toList();
+      _paused = list.where((b) => b['state'] == 'paused').toList();
+      setState(() { _loading = false; _error = null; });
+    } else {
+      setState(() {
+        _loading = false;
+        _error = (res['error'] ?? res['detail'] ?? 'Could not load batches.').toString();
+      });
+    }
+  }
+
+  Future<void> _newBatch() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New Stock Take Batch'),
+        content: TextField(
+          key: const Key('batchNameField'),
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Batch name *',
+            hintText: 'e.g. Aisle 3, North dock',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    setState(() => _creating = true);
+    final res = await ApiService.post('/api/stocktake/batches', {'name': name.trim()});
+    setState(() => _creating = false);
+    if (res['success'] == true && res['batch'] != null) {
+      _openScan(Map<String, dynamic>.from(res['batch']));
+    } else {
+      _showError(res, 'create a batch');
+    }
+  }
+
+  Future<void> _join(Map b) async {
+    final res = await ApiService.post(
+        '/api/stocktake/batches/${b['batch_id']}/join', {});
+    if (res['success'] == true) {
+      _openScan(Map<String, dynamic>.from(res['batch'] ?? b));
+    } else {
+      _showError(res, 'join this batch');
+    }
+  }
+
+  void _showError(Map res, String what) {
+    final d = (res['detail'] ?? '').toString();
+    final msg = RegExp('permission denied', caseSensitive: false).hasMatch(d)
+        ? "You don't have permission to $what."
+        : (d.isNotEmpty ? d : 'Could not $what.');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red[700]));
+    }
+  }
+
+  Future<void> _openScan(Map<String, dynamic> batch) async {
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => StocktakeBatchScanScreen(
+        batch: batch,
+        vendors: widget.vendors,
+        materialTypes: widget.materialTypes,
+        basisWeights: widget.basisWeights,
+        widths: widget.widths,
+      ),
+    ));
+    _load(); // refresh state/counts on return
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF00897B),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Annual Count — Batches',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const Key('newBatchButton'),
+        backgroundColor: const Color(0xFF00897B),
+        onPressed: _creating ? null : _newBatch,
+        icon: _creating
+            ? const SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.add),
+        label: const Text('New Batch'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+                children: [
+                  if (_error != null)
+                    _stMessage(_error, false),
+                  _sectionHeader('Open — tap to join', _open.length),
+                  if (_open.isEmpty) _emptyNote('No open batches. Tap "New Batch" to start one.'),
+                  ..._open.map((b) => _batchCard(b, resume: false)),
+                  const SizedBox(height: 18),
+                  _sectionHeader('Paused — tap to resume', _paused.length),
+                  if (_paused.isEmpty) _emptyNote('No paused batches.'),
+                  ..._paused.map((b) => _batchCard(b, resume: true)),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _sectionHeader(String label, int count) => Padding(
+        padding: const EdgeInsets.only(bottom: 8, top: 4),
+        child: Text('$label  ($count)',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700,
+                color: Colors.black54)),
+      );
+
+  Widget _emptyNote(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(text, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+      );
+
+  Widget _batchCard(Map b, {required bool resume}) {
+    final participants = (b['participants'] is Map) ? (b['participants'] as Map).length : 0;
+    final count = b['scan_count'] ?? 0;
+    final color = resume ? const Color(0xFFb36c00) : const Color(0xFF00897B);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        elevation: 1,
+        child: InkWell(
+          onTap: () => _join(b),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Row(
+              children: [
+                Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                      color: color.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Icon(resume ? Icons.play_arrow_rounded : Icons.login_rounded,
+                      color: color, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text((b['name'] ?? '—').toString(),
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold,
+                            color: Colors.black87)),
+                    const SizedBox(height: 3),
+                    Text('$count scans · $participants ${participants == 1 ? 'person' : 'people'}'
+                        ' · ${b['created_by_name'] ?? '—'}',
+                        style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                  ],
+                )),
+                Icon(resume ? Icons.chevron_right : Icons.chevron_right,
+                    color: Colors.black26, size: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Batch-scoped scanning ──────────────────────────────────────────────
+class StocktakeBatchScanScreen extends StatefulWidget {
+  final Map batch;
+  final List<Map> vendors;
+  final List<String> materialTypes;
+  final List<String> basisWeights;
+  final List<String> widths;
+  const StocktakeBatchScanScreen({
+    super.key,
+    required this.batch,
+    required this.vendors,
+    required this.materialTypes,
+    required this.basisWeights,
+    required this.widths,
+  });
+  @override
+  State<StocktakeBatchScanScreen> createState() => _StocktakeBatchScanScreenState();
+}
+
+class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
+  late String _batchId;
+  late String _batchName;
+  int _count = 0;
+
+  _StSub _sub = _StSub.parent;
+  bool _twoParent = false;
+  bool _busy = false;
+  bool _exiting = false;
+  String? _message;
+  bool _ok = false;
+  bool _warn = false;
+
+  final List<Map> _recent = [];
+
+  final _scanCtrl = TextEditingController();
+  final _scanFocus = FocusNode();
+
+  // Inline Initial Stock Entry — PARENT (shown when a parent is not in system)
+  bool _showParentForm = false;
+  String _pendingRollId = '';
+  final _poCtrl = TextEditingController();
+  final _pLengthCtrl = TextEditingController();
+  final _pWeightCtrl = TextEditingController();
+  final _pNotesCtrl = TextEditingController();
+  String? _vendor, _materialType, _basisWeight, _width;
+
+  // Inline Initial Stock Entry — CHILD (product + parents come from the scan)
+  bool _showChildForm = false;
+  String _pendingChildProduct = '';
+  List<String> _pendingChildParents = [];
+  final _cQtyCtrl = TextEditingController();
+  final _cLengthCtrl = TextEditingController();
+  final _cWeightCtrl = TextEditingController();
+  final _cNotesCtrl = TextEditingController();
+
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _batchId = (widget.batch['batch_id'] ?? '').toString();
+    _batchName = (widget.batch['name'] ?? 'Batch').toString();
+    _count = (widget.batch['scan_count'] is int) ? widget.batch['scan_count'] : 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scanFocus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scanCtrl.dispose(); _scanFocus.dispose();
+    _poCtrl.dispose(); _pLengthCtrl.dispose(); _pWeightCtrl.dispose(); _pNotesCtrl.dispose();
+    _cQtyCtrl.dispose(); _cLengthCtrl.dispose(); _cWeightCtrl.dispose(); _cNotesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toLogin() {
+    if (mounted) Navigator.pushReplacement(context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
+
+  Future<Map<String, dynamic>> _postScan(Map<String, dynamic> body) =>
+      ApiService.post('/api/stocktake/batches/$_batchId/scans', body);
+
+  bool _isNotFound(Map res) =>
+      (res['detail'] ?? '').toString().toLowerCase().contains('not found in system');
+
+  void _afterRecorded(Map res, String type, String label) {
+    final dup = res['duplicate_in_batch'] == true;
+    final wasNew = res['was_already_in_system'] == false;
+    setState(() {
+      _count += 1;
+      _recent.insert(0, {
+        'type': type, 'label': label, 'isNew': wasNew, 'dup': dup,
+        'at': DateTime.now(),
+      });
+      _busy = false;
+      _ok = true;
+      _warn = dup;
+      _message = dup
+          ? '⚠ Counted again — $label was already scanned in this batch.'
+          : (wasNew ? '✓ Added & counted $label' : '✓ Recorded $label');
+    });
+  }
+
+  // ── Parent scan (POST-first) ──
+  Future<void> _onScanParent(String value) async {
+    final rollId = ParentValidation.normalizeRollId(value);
+    if (rollId.isEmpty) return;
+    setState(() { _busy = true; _message = null; });
+    final res = await _postScan(
+        {'type': 'parent', 'roll_id': rollId, 'was_already_in_system': true});
+    if (res['detail'] == 'session_expired') { _toLogin(); return; }
+    if (res['success'] == true) {
+      _afterRecorded(res, 'parent', rollId);
+      _scanCtrl.clear();
+      _scanFocus.requestFocus();
+    } else if (_isNotFound(res)) {
+      setState(() {
+        _busy = false; _showParentForm = true; _pendingRollId = rollId;
+        _ok = false; _warn = false;
+        _message = 'Roll $rollId is not in the system — add its details to count it.';
+      });
+      _scanCtrl.clear();
+    } else {
+      setState(() {
+        _busy = false; _ok = false; _warn = false;
+        _message = (res['detail'] ?? 'Scan failed.').toString();
+      });
+    }
+  }
+
+  Future<void> _submitParentForm() async {
+    if (_vendor == null || _materialType == null || _basisWeight == null || _width == null) {
+      setState(() { _message = 'Vendor, Material Type, Basis Weight and Width are required.'; _ok = false; _warn = false; });
+      return;
+    }
+    if (_pLengthCtrl.text.trim().isEmpty || _pWeightCtrl.text.trim().isEmpty) {
+      setState(() { _message = 'Length and Weight are required.'; _ok = false; _warn = false; });
+      return;
+    }
+    setState(() => _submitting = true);
+    final res = await _postScan({
+      'type': 'parent',
+      'roll_id': _pendingRollId,
+      'was_already_in_system': false,
+      'initial_entry': {
+        'roll_id': _pendingRollId,
+        'vendor_id': _vendor,
+        'po_number': _poCtrl.text.trim(),
+        'material_type': _materialType,
+        'basis_weight': _basisWeight,
+        'width': double.tryParse(_width ?? '') ?? 0,
+        'length': double.tryParse(_pLengthCtrl.text) ?? 0,
+        'weight': double.tryParse(_pWeightCtrl.text) ?? 0,
+        'notes': _pNotesCtrl.text.trim(),
+      },
+    });
+    setState(() => _submitting = false);
+    if (res['detail'] == 'session_expired') { _toLogin(); return; }
+    if (res['success'] == true) {
+      final id = _pendingRollId;
+      setState(() {
+        _showParentForm = false; _pendingRollId = '';
+        _poCtrl.clear(); _pLengthCtrl.clear(); _pWeightCtrl.clear(); _pNotesCtrl.clear();
+        _vendor = null; _materialType = null; _basisWeight = null; _width = null;
+      });
+      _afterRecorded(res, 'parent', id);
+      _scanFocus.requestFocus();
+    } else {
+      setState(() { _message = (res['detail'] ?? 'Submit failed.').toString(); _ok = false; _warn = false; });
+    }
+  }
+
+  // ── Child scan (POST-first) ──
+  Future<void> _onScanChild(String value) async {
+    final parsed = ParentValidation.parseComposite(value);
+    if (parsed == null) {
+      setState(() { _message = 'Invalid composite — expected "ProductID-ParentID".'; _ok = false; _warn = false; });
+      _scanCtrl.clear();
+      return;
+    }
+    await _recordChild(parsed.productId, [parsed.parentId]);
+  }
+
+  Future<void> _onTwoParentPair(String scan1, String scan2) async {
+    final p1 = ParentValidation.parseComposite(scan1);
+    final p2 = ParentValidation.parseComposite(scan2);
+    if (p1 == null || p2 == null) {
+      setState(() { _message = 'Invalid composite — expected "ProductID-ParentID".'; _ok = false; _warn = false; });
+      return;
+    }
+    if (p1.productId != p2.productId) {
+      setState(() { _message = 'Product ID mismatch between the two labels — both must be the same product.'; _ok = false; _warn = false; });
+      return;
+    }
+    if (p1.parentId == p2.parentId) {
+      setState(() { _message = 'Both labels are from the same parent. Scan one label per parent.'; _ok = false; _warn = false; });
+      return;
+    }
+    await _recordChild(p1.productId, [p1.parentId, p2.parentId], fromTwoParent: true);
+  }
+
+  Future<void> _recordChild(String productId, List<String> parents,
+      {bool fromTwoParent = false}) async {
+    productId = ParentValidation.normalizeProductId(productId);
+    parents = parents.map(ParentValidation.normalizeRollId).toList();
+    setState(() { _busy = true; _message = null; });
+    final label = '$productId / ${parents.join(' + ')}';
+    final res = await _postScan({
+      'type': 'child', 'product_id': productId,
+      'parent_roll_ids': parents, 'was_already_in_system': true,
+    });
+    if (res['detail'] == 'session_expired') { _toLogin(); return; }
+    if (res['success'] == true) {
+      _afterRecorded(res, 'child', label);
+      _scanCtrl.clear();
+      if (!fromTwoParent) _scanFocus.requestFocus();
+    } else if (_isNotFound(res)) {
+      setState(() {
+        _busy = false; _showChildForm = true;
+        _pendingChildProduct = productId; _pendingChildParents = parents;
+        _ok = false; _warn = false;
+        _message = 'Child $productId is not in the system — add its details to count it.';
+      });
+      _scanCtrl.clear();
+    } else {
+      setState(() {
+        _busy = false; _ok = false; _warn = false;
+        _message = (res['detail'] ?? 'Scan failed.').toString();
+      });
+    }
+  }
+
+  Future<void> _submitChildForm() async {
+    final qty = int.tryParse(_cQtyCtrl.text.trim()) ?? 0;
+    if (qty < 1) {
+      setState(() { _message = 'Quantity must be 1 or more.'; _ok = false; _warn = false; });
+      return;
+    }
+    if (_cLengthCtrl.text.trim().isEmpty || _cWeightCtrl.text.trim().isEmpty) {
+      setState(() { _message = 'Length and Weight are required.'; _ok = false; _warn = false; });
+      return;
+    }
+    setState(() => _submitting = true);
+    final res = await _postScan({
+      'type': 'child',
+      'product_id': _pendingChildProduct,
+      'parent_roll_ids': _pendingChildParents,
+      'was_already_in_system': false,
+      'initial_entry': {
+        'parent_roll_ids': _pendingChildParents,
+        'product_id': _pendingChildProduct,
+        'quantity': qty,
+        'length': double.tryParse(_cLengthCtrl.text) ?? 0,
+        'weight': double.tryParse(_cWeightCtrl.text) ?? 0,
+        'notes': _cNotesCtrl.text.trim(),
+      },
+    });
+    setState(() => _submitting = false);
+    if (res['detail'] == 'session_expired') { _toLogin(); return; }
+    if (res['success'] == true) {
+      final label = '$_pendingChildProduct / ${_pendingChildParents.join(' + ')}';
+      setState(() {
+        _showChildForm = false; _pendingChildProduct = ''; _pendingChildParents = [];
+        _cQtyCtrl.clear(); _cLengthCtrl.clear(); _cWeightCtrl.clear(); _cNotesCtrl.clear();
+      });
+      _afterRecorded(res, 'child', label);
+      _scanFocus.requestFocus();
+    } else {
+      setState(() { _message = (res['detail'] ?? 'Submit failed.').toString(); _ok = false; _warn = false; });
+    }
+  }
+
+  // ── Save & exit (pause) ──
+  Future<void> _saveExit() async {
+    setState(() => _exiting = true);
+    await ApiService.post('/api/stocktake/batches/$_batchId/pause', {});
+    if (mounted) Navigator.pop(context);
+  }
+
+  bool get _inInlineForm => _showParentForm || _showChildForm;
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        if (_showParentForm) { setState(() { _showParentForm = false; _message = null; }); return false; }
+        if (_showChildForm) { setState(() { _showChildForm = false; _message = null; }); return false; }
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF00897B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_batchName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              Text('$_count scans', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            ],
+          ),
+          actions: [
+            if (!_inInlineForm)
+              TextButton.icon(
+                key: const Key('saveExitButton'),
+                onPressed: _exiting ? null : _saveExit,
+                icon: _exiting
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.save_alt, color: Colors.white, size: 20),
+                label: const Text('Save & exit', style: TextStyle(color: Colors.white)),
+              ),
+          ],
+        ),
+        body: _showParentForm
+            ? _buildParentInline()
+            : _showChildForm
+                ? _buildChildInline()
+                : _buildScan(),
+      ),
+    );
+  }
+
+  Widget _buildScan() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _stMessage(_message, _ok, warning: _warn),
+          // Parent | Child toggle
+          Row(children: [
+            Expanded(child: _segBtn('Parent', _sub == _StSub.parent, () {
+              setState(() { _sub = _StSub.parent; _twoParent = false; _message = null; });
+              _scanFocus.requestFocus();
+            })),
+            const SizedBox(width: 10),
+            Expanded(child: _segBtn('Child', _sub == _StSub.child, () {
+              setState(() { _sub = _StSub.child; _message = null; });
+              _scanFocus.requestFocus();
+            })),
+          ]),
+          const SizedBox(height: 16),
+          if (_sub == _StSub.child) Row(children: [
+            const Text('Two-Parent Roll',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Switch(
+              key: const Key('batchTwoParentToggle'),
+              value: _twoParent,
+              onChanged: (v) => setState(() => _twoParent = v),
+            ),
+          ]),
+          Text(
+            _sub == _StSub.parent
+                ? 'Scan the Parent Roll ID barcode.'
+                : (_twoParent
+                    ? 'Scan BOTH composite labels (one per parent) for each child roll.'
+                    : 'Scan the composite barcode (ProductID-ParentID).'),
+            style: const TextStyle(fontSize: 14, color: Colors.black54),
+          ),
+          const SizedBox(height: 10),
+          if (_sub == _StSub.child && _twoParent)
+            TwoParentScanFields(
+              key: const Key('batchChildTwoParentScan'),
+              firstFieldFocusNode: _scanFocus,
+              enabled: !_busy,
+              onPair: _onTwoParentPair,
+            )
+          else
+            TextField(
+              key: const Key('batchScanField'),
+              controller: _scanCtrl,
+              focusNode: _scanFocus,
+              autofocus: true,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              inputFormatters: const [UpperCaseRollIdFormatter()],
+              onSubmitted: _sub == _StSub.parent ? _onScanParent : _onScanChild,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                labelText: _sub == _StSub.parent ? 'Parent Roll ID' : 'Composite Barcode',
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+                prefixIcon: const Icon(Icons.qr_code_scanner, size: 28),
+              ),
+            ),
+          const SizedBox(height: 8),
+          if (_busy) const LinearProgressIndicator(),
+          const SizedBox(height: 18),
+          _recentList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _segBtn(String label, bool active, VoidCallback onTap) {
+    return SizedBox(
+      height: 46,
+      child: active
+          ? ElevatedButton(
+              onPressed: onTap,
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00897B),
+                  foregroundColor: Colors.white),
+              child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            )
+          : OutlinedButton(
+              onPressed: onTap,
+              child: Text(label, style: const TextStyle(fontSize: 16)),
+            ),
+    );
+  }
+
+  Widget _recentList() {
+    if (_recent.isEmpty) {
+      return Text('No scans yet in this session.',
+          style: TextStyle(fontSize: 13, color: Colors.grey[500]));
+    }
+    final shown = _recent.take(40).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Recent scans (this session)',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black54)),
+        const SizedBox(height: 6),
+        ...shown.map((s) {
+          final isChild = s['type'] == 'child';
+          final isNew = s['isNew'] == true;
+          final dup = s['dup'] == true;
+          final at = s['at'] as DateTime;
+          final hh = at.hour.toString().padLeft(2, '0');
+          final mm = at.minute.toString().padLeft(2, '0');
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                    color: isChild ? const Color(0xFFf3e5f5) : const Color(0xFFe0f2f1),
+                    borderRadius: BorderRadius.circular(5)),
+                child: Text(isChild ? 'CHILD' : 'PARENT',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
+                        color: isChild ? const Color(0xFF6a1b9a) : const Color(0xFF00695c))),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text((s['label'] ?? '').toString(),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis)),
+              if (dup) const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: Text('dup', style: TextStyle(fontSize: 11, color: Color(0xFFb36c00), fontWeight: FontWeight.bold)),
+              ),
+              if (isNew) const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: Text('NEW', style: TextStyle(fontSize: 11, color: Color(0xFF9a6700), fontWeight: FontWeight.bold)),
+              ),
+              Text('$hh:$mm', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ── Inline PARENT entry (reuses the masters dropdowns) ──
+  Widget _buildParentInline() {
+    final vendorItems = widget.vendors.map((v) => '${v['vendor_id']} — ${v['vendor_name']}').toList();
+    final selectedVendor = _vendor != null
+        ? (widget.vendors.where((v) => v['vendor_id']?.toString() == _vendor).isNotEmpty
+            ? '$_vendor — ${widget.vendors.firstWhere((v) => v['vendor_id']?.toString() == _vendor)['vendor_name']}'
+            : null)
+        : null;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _stMessage(_message, _ok, warning: _warn),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue),
+              ),
+              child: Text('New parent: $_pendingRollId',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 14),
+            Builder(builder: (ctx) => DropdownSearch<String>(
+              onBeforePopupOpening: (_) => FieldFocus.ensureRoomForDropdown(ctx),
+              items: vendorItems,
+              selectedItem: selectedVendor,
+              dropdownDecoratorProps: const DropDownDecoratorProps(
+                dropdownSearchDecoration: InputDecoration(
+                  labelText: 'Vendor *',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+                ),
+              ),
+              popupProps: PopupProps.menu(
+                showSearchBox: true,
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+              ),
+              onChanged: (val) {
+                FocusManager.instance.primaryFocus?.unfocus();
+                if (val == null) { setState(() => _vendor = null); return; }
+                setState(() => _vendor = val.split(' — ')[0]);
+              },
+            )),
+            const SizedBox(height: 14),
+            _stField('PO Number', _poCtrl),
+            const SizedBox(height: 14),
+            _stSimpleDropdown(
+              context: context,
+              label: 'Material Type *',
+              items: widget.materialTypes,
+              value: _materialType,
+              enabled: _basisWeight != 'Crepe' || _materialType == 'Crepe',
+              onChanged: (v) {
+                setState(() {
+                  _materialType = v;
+                  if (v == 'Crepe') _basisWeight = 'Crepe';
+                  else if (_basisWeight == 'Crepe') _basisWeight = null;
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            _stSimpleDropdown(
+              context: context,
+              label: 'Basis Weight *',
+              items: widget.basisWeights,
+              value: _basisWeight,
+              enabled: _materialType != 'Crepe' || _basisWeight == 'Crepe',
+              onChanged: (v) {
+                setState(() {
+                  _basisWeight = v;
+                  if (v == 'Crepe') _materialType = 'Crepe';
+                  else if (_materialType == 'Crepe') _materialType = null;
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: _stSimpleDropdown(
+                context: context,
+                label: 'Width (in) *',
+                items: widget.widths,
+                value: _width,
+                onChanged: (v) => setState(() => _width = v),
+              )),
+              const SizedBox(width: 12),
+              Expanded(child: _stField('Length (ft) *', _pLengthCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  textInputAction: TextInputAction.next)),
+            ]),
+            const SizedBox(height: 14),
+            _stField('Weight (lbs) *', _pWeightCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.done),
+            const SizedBox(height: 14),
+            _stField('Notes', _pNotesCtrl, multiline: true),
+            const SizedBox(height: 24),
+            _inlineButtons(_submitParentForm, () => setState(() {
+              _showParentForm = false; _pendingRollId = ''; _message = null;
+            })),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Inline CHILD entry (product + parents come from the scan) ──
+  Widget _buildChildInline() {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _stMessage(_message, _ok, warning: _warn),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Product: $_pendingChildProduct',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('Parents: ${_pendingChildParents.join(' + ')}',
+                      style: const TextStyle(fontSize: 16)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: _stField('Quantity *', _cQtyCtrl,
+                  keyboardType: TextInputType.number, textInputAction: TextInputAction.next)),
+              const SizedBox(width: 12),
+              Expanded(child: _stField('Length (ft) *', _cLengthCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  textInputAction: TextInputAction.next)),
+            ]),
+            const SizedBox(height: 14),
+            _stField('Weight (lbs) *', _cWeightCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.done),
+            const SizedBox(height: 14),
+            _stField('Notes', _cNotesCtrl, multiline: true),
+            const SizedBox(height: 24),
+            _inlineButtons(_submitChildForm, () => setState(() {
+              _showChildForm = false; _pendingChildProduct = ''; _pendingChildParents = []; _message = null;
+            })),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _inlineButtons(Future<void> Function() onSave, VoidCallback onCancel) {
+    return Row(children: [
+      Expanded(child: SizedBox(
+        height: 56,
+        child: ElevatedButton.icon(
+          key: const Key('batchInlineSubmit'),
+          onPressed: _submitting ? null : () => onSave(),
+          icon: _submitting
+              ? const SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.save),
+          label: Text(_submitting ? 'Saving...' : 'Save & Count',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00897B), foregroundColor: Colors.white),
+        ),
+      )),
+      const SizedBox(width: 12),
+      SizedBox(
+        height: 56,
+        child: OutlinedButton(
+          onPressed: _submitting ? null : onCancel,
+          child: const Text('Cancel', style: TextStyle(fontSize: 18)),
+        ),
+      ),
+    ]);
   }
 }

@@ -78,6 +78,12 @@ class _LoginScreenState extends State<LoginScreen> {
     if (res['token'] != null) {
       await ApiService.saveToken(res['token']);
       await ApiService.saveUserProfile(res['user'] ?? {});
+      // Best-effort: cache effective permissions for UX gating (non-fatal —
+      // mirrors web index.html; backend remains the real gate).
+      final uid = (res['user'] ?? {})['uid'];
+      if (uid is String && uid.isNotEmpty) {
+        try { await ApiService.refreshPermissions(uid); } catch (_) {}
+      }
       final mustChange = res['must_change_password'] == true;
       if (!mounted) return;
       Navigator.pushReplacement(
