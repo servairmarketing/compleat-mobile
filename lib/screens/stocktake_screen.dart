@@ -211,6 +211,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               MaterialPageRoute(
                 builder: (_) => StocktakeBatchListScreen(
                   vendors: _vendors,
+                  products: _products,
                   materialTypes: _materialTypes,
                   basisWeights: _basisWeights,
                   widths: _widths,
@@ -1502,12 +1503,14 @@ class _PrintChildFormState extends State<_PrintChildForm> {
 
 class StocktakeBatchListScreen extends StatefulWidget {
   final List<Map> vendors;
+  final List<Map> products;
   final List<String> materialTypes;
   final List<String> basisWeights;
   final List<String> widths;
   const StocktakeBatchListScreen({
     super.key,
     required this.vendors,
+    required this.products,
     required this.materialTypes,
     required this.basisWeights,
     required this.widths,
@@ -1616,6 +1619,7 @@ class _StocktakeBatchListScreenState extends State<StocktakeBatchListScreen> {
       builder: (_) => StocktakeBatchScanScreen(
         batch: batch,
         vendors: widget.vendors,
+        products: widget.products,
         materialTypes: widget.materialTypes,
         basisWeights: widget.basisWeights,
         widths: widget.widths,
@@ -1732,6 +1736,7 @@ class _StocktakeBatchListScreenState extends State<StocktakeBatchListScreen> {
 class StocktakeBatchScanScreen extends StatefulWidget {
   final Map batch;
   final List<Map> vendors;
+  final List<Map> products;
   final List<String> materialTypes;
   final List<String> basisWeights;
   final List<String> widths;
@@ -1739,6 +1744,7 @@ class StocktakeBatchScanScreen extends StatefulWidget {
     super.key,
     required this.batch,
     required this.vendors,
+    required this.products,
     required this.materialTypes,
     required this.basisWeights,
     required this.widths,
@@ -1761,6 +1767,9 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
   bool _warn = false;
 
   final List<Map> _recent = [];
+  // Issue 3 (TC22) — true while the batch's already-recorded scans are loading
+  // on entry/resume (the recent list shows the whole batch, not just this run).
+  bool _loadingScans = true;
 
   final _scanCtrl = TextEditingController();
   final _scanFocus = FocusNode();
@@ -1791,9 +1800,51 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
     _batchId = (widget.batch['batch_id'] ?? '').toString();
     _batchName = (widget.batch['name'] ?? 'Batch').toString();
     _count = (widget.batch['scan_count'] is int) ? widget.batch['scan_count'] : 0;
+    _loadExistingScans(); // Issue 3 — show what's already been counted in this batch.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scanFocus.requestFocus();
     });
+  }
+
+  // Issue 3 (TC22) — pull the batch's existing scans so a resumed/joined batch
+  // shows what's already counted (newest first) and the header count reflects the
+  // true total, not just this session's adds. Backend already sorts newest-first.
+  Future<void> _loadExistingScans() async {
+    final res = await ApiService.get('/api/stocktake/batches/$_batchId/scans');
+    if (res['error'] == 'session_expired') { _toLogin(); return; }
+    if (!mounted) return;
+    if (res['scans'] is List) {
+      final list = List<Map>.from(res['scans']);
+      setState(() {
+        _recent
+          ..clear()
+          ..addAll(list.map((s) => {
+                'type': s['type'],
+                'label': _labelForScan(s),
+                'isNew': s['was_already_in_system'] == false,
+                'dup': s['duplicate_in_batch'] == true,
+                'at': DateTime.tryParse((s['scanned_at'] ?? '').toString())?.toLocal()
+                    ?? DateTime.now(),
+              }));
+        if (res['count'] is int) _count = res['count'];
+        _loadingScans = false;
+      });
+    } else {
+      setState(() => _loadingScans = false);
+    }
+  }
+
+  // Display label for a loaded scan, matching the in-session format: parent → its
+  // roll_id; child → "ProductID / parent1 + parent2".
+  String _labelForScan(Map s) {
+    if (s['type'] == 'child') {
+      final pid = (s['product_id'] ?? '').toString();
+      final parents = (s['parent_roll_ids'] is List)
+          ? (s['parent_roll_ids'] as List).join(' + ')
+          : '';
+      return '$pid / $parents';
+    }
+    return (s['roll_id'] ?? '').toString();
   }
 
   @override
@@ -1833,10 +1884,35 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
     });
   }
 
+  // Issue 2 (TC22) — under the Parent toggle, reject a value that is really a
+  // child/product instead of recording it as a bogus parent. Detection (all on
+  // the §2.14-normalized value) covers the two child forms the operator can scan:
+  //   (a) a composite "ProductID-ParentID"  → ParentValidation.parseComposite
+  //        returns non-null (product IDs carry a hyphen, parent roll IDs don't);
+  //   (b) a bare product ID (e.g. BVR-696000) → matches the loaded product master.
+  // Anything that is NEITHER a known product NOR a composite is a genuine parent
+  // roll ID and proceeds normally. Reuses parseComposite + the product master
+  // already loaded in StocktakeScreen (no new lookup, no duplicated parsing).
+  bool _looksLikeChildUnderParent(String normalizedId) {
+    if (ParentValidation.parseComposite(normalizedId) != null) return true;
+    return widget.products.any((p) =>
+        ParentValidation.normalizeProductId(p['product_id']?.toString()) == normalizedId);
+  }
+
   // ── Parent scan (POST-first) ──
   Future<void> _onScanParent(String value) async {
     final rollId = ParentValidation.normalizeRollId(value);
     if (rollId.isEmpty) return;
+    if (_looksLikeChildUnderParent(rollId)) {
+      setState(() {
+        _busy = false; _ok = false; _warn = false;
+        _message = '$rollId looks like a child/product, not a parent roll '
+            '— switch to Child mode to scan it.';
+      });
+      _scanCtrl.clear();
+      _scanFocus.requestFocus();
+      return;
+    }
     setState(() { _busy = true; _message = null; });
     final res = await _postScan(
         {'type': 'parent', 'roll_id': rollId, 'was_already_in_system': true});
@@ -2146,16 +2222,27 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
   }
 
   Widget _recentList() {
+    if (_loadingScans && _recent.isEmpty) {
+      return Row(children: [
+        const SizedBox(width: 14, height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(width: 10),
+        Text('Loading scans…', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+      ]);
+    }
     if (_recent.isEmpty) {
-      return Text('No scans yet in this session.',
+      return Text('No scans in this batch yet.',
           style: TextStyle(fontSize: 13, color: Colors.grey[500]));
     }
     final shown = _recent.take(40).toList();
+    final header = _recent.length > shown.length
+        ? 'Recent scans (this batch) — showing latest ${shown.length} of ${_recent.length}'
+        : 'Recent scans (this batch)';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Recent scans (this session)',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black54)),
+        Text(header,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black54)),
         const SizedBox(height: 6),
         ...shown.map((s) {
           final isChild = s['type'] == 'child';
