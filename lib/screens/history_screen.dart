@@ -26,9 +26,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // Conversions state
   List<Map> _conversions = [];
 
-  // Stock Take state — Initial Entries only. The old free-scan "Annual Scans"
-  // sub-tab + the /stocktake/list endpoint were retired with the batch system.
+  // Stock Take state. Two sub-views under the Stock Take tab:
+  //   0 = Initial Entries — rolls where source=="stocktake" (the old free-scan
+  //       "Annual Scans" sub-tab + /stocktake/list endpoint were retired).
+  //   1 = Batches — annual stock-take batches the user created or joined.
   List<Map> _stockInitial = [];   // rolls where source=="stocktake" (parent+child)
+  List<Map> _stockBatches = [];   // annual stock-take batches (all states)
+  String? _uid;                   // logged-in uid, for "my batches" filtering
+  int _stockSubTab = 0;           // 0 = Initial Entries, 1 = Batches
 
   bool _loading = false;
   int _selectedTab = 0;
@@ -55,6 +60,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final sRes = await ApiService.get('/sales/list?limit=50');
     final cRes = await ApiService.get('/conversion/list?limit=50');
     final siRes = await ApiService.get('/stocktake/initial');
+    final sbRes = await ApiService.get('/api/stocktake/batches');
+    final profile = await ApiService.getUserProfile();
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -85,12 +92,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
       newStockInitial = List<Map>.from(siRes['rolls']);
     }
 
+    // Batches: no server-side "my batches" filter exists (GET /api/stocktake/
+    // batches takes only an optional `state` query), so we fetch all and filter
+    // client-side by uid in _isMyBatch. Sort newest-first here.
+    List<Map> newStockBatches = [];
+    if (sbRes['batches'] is List) {
+      newStockBatches = List<Map>.from(sbRes['batches']);
+      newStockBatches.sort((a, b) => (b['created_at'] ?? '').toString()
+          .compareTo((a['created_at'] ?? '').toString()));
+    }
+
     setState(() {
+      _uid = profile?['uid']?.toString();
       _productions = newProductions;
       _products = newProducts;
       _sales = newSales;
       _conversions = newConversions;
       _stockInitial = newStockInitial;
+      _stockBatches = newStockBatches;
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
@@ -221,7 +240,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               ? _buildSalesList()
                               : _selectedTab == 3
                                   ? _buildConversionsList()
-                                  : _buildStockInitialList(),
+                                  : _buildStockTakeTab(),
                 ),
               ),
             ],
@@ -716,6 +735,178 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           fontSize: 13,
                           color: Colors.black87,
                           fontFamily: 'monospace')),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dateLabel,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey)),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Stock Take tab → toggle between Initial Entries and Batches ────────────
+
+  Widget _buildStockTakeTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+          child: Row(
+            children: [
+              _stockSubToggleBtn('Initial Entries', 0,
+                  widgetKey: const Key('stockInitialSubTab')),
+              const SizedBox(width: 8),
+              _stockSubToggleBtn('Batches', 1,
+                  widgetKey: const Key('stockBatchesSubTab')),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _stockSubTab == 0
+              ? _buildStockInitialList()
+              : _buildStockBatchesList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _stockSubToggleBtn(String label, int idx, {Key? widgetKey}) {
+    final selected = _stockSubTab == idx;
+    return Expanded(
+      child: GestureDetector(
+        key: widgetKey,
+        onTap: () => setState(() => _stockSubTab = idx),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF1a73e8) : Colors.white,
+            border: Border.all(color: const Color(0xFF1a73e8)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: selected ? Colors.white : const Color(0xFF1a73e8),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // "My own + participated": creator uid matches, OR my uid is a key in the
+  // participants map (keyed by uid per the batch data model). If the uid can't
+  // be resolved (profile missing), fall back to showing all rather than an
+  // empty screen — read-only view, internal app.
+  bool _isMyBatch(Map b) {
+    final uid = _uid;
+    if (uid == null || uid.isEmpty) return true;
+    if ((b['created_by_uid'] ?? '').toString() == uid) return true;
+    final p = b['participants'];
+    if (p is Map && p.containsKey(uid)) return true;
+    return false;
+  }
+
+  // (bg, fg, label) for a batch state badge. Frozen is clearly distinguished.
+  static (Color, Color, String) _batchStateBadge(String state) {
+    switch (state) {
+      case 'open':
+        return (Colors.green.shade100, Colors.green.shade800, 'OPEN');
+      case 'paused':
+        return (Colors.orange.shade100, Colors.orange.shade800, 'PAUSED');
+      case 'frozen':
+        return (Colors.blueGrey.shade100, Colors.blueGrey.shade800, 'FROZEN');
+      default:
+        return (Colors.grey.shade200, Colors.grey.shade700,
+            state.isEmpty ? '—' : state.toUpperCase());
+    }
+  }
+
+  Widget _buildStockBatchesList() {
+    final mine = _stockBatches.where(_isMyBatch).toList();
+    if (mine.isEmpty) {
+      return const Center(
+          child: Text('No batches you created or joined.',
+              style: TextStyle(fontSize: 18, color: Colors.grey)));
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: mine.length,
+      itemBuilder: (context, i) {
+        final b = mine[i];
+        final state = (b['state'] ?? '').toString();
+        final badge = _batchStateBadge(state);
+        final count = b['scan_count'] ?? 0;
+        final participants =
+            (b['participants'] is Map) ? (b['participants'] as Map).length : 0;
+        final ts = DateTime.tryParse((b['created_at'] ?? '').toString());
+        final dateLabel = ts != null
+            ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+            : '—';
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _BatchDetailScreen(batch: b),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          (b['name'] ?? '—').toString(),
+                          style: const TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: BoxDecoration(
+                          color: badge.$1,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          badge.$3,
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: badge.$2),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                      '$count scan${count == 1 ? '' : 's'} · '
+                      '$participants ${participants == 1 ? 'person' : 'people'} · '
+                      '${b['created_by_name'] ?? '—'}',
+                      style: const TextStyle(
+                          fontSize: 13, color: Colors.black54)),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1466,6 +1657,288 @@ class _StockInitialDetailScreen extends StatelessWidget {
               const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
         ),
       ),
+    );
+  }
+}
+
+// ── Stock Take Batch Detail (Level 2) ───────────────────────────────────────
+// Read-only: summary (name, state, scan_count, created by, created/frozen
+// dates, participants) + the batch's scans. Corrections are web-only by an
+// earlier decision — no edit/delete here.
+
+class _BatchDetailScreen extends StatefulWidget {
+  final Map batch;
+  const _BatchDetailScreen({required this.batch});
+
+  @override
+  State<_BatchDetailScreen> createState() => _BatchDetailScreenState();
+}
+
+class _BatchDetailScreenState extends State<_BatchDetailScreen> {
+  bool _loading = true;
+  String? _error;
+  List<Map> _scans = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadScans();
+  }
+
+  Future<void> _loadScans() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final id = (widget.batch['batch_id'] ?? '').toString();
+    final res = await ApiService.get('/api/stocktake/batches/$id/scans');
+    if (res['scans'] is List) {
+      // Backend returns newest-first; keep as-is.
+      _scans = List<Map>.from(res['scans']);
+      setState(() => _loading = false);
+    } else {
+      setState(() {
+        _loading = false;
+        _error =
+            (res['error'] ?? res['detail'] ?? 'Could not load scans.').toString();
+      });
+    }
+  }
+
+  static String _fmtDate(dynamic raw) {
+    final ts = DateTime.tryParse((raw ?? '').toString());
+    return ts != null
+        ? '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}'
+        : ((raw ?? '').toString().isEmpty ? '—' : raw.toString());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.batch;
+    final state = (b['state'] ?? '').toString();
+    final badge = _HistoryScreenState._batchStateBadge(state);
+    final isFrozen = state == 'frozen';
+
+    final participantsMap =
+        (b['participants'] is Map) ? Map.from(b['participants'] as Map) : {};
+    final participantNames = participantsMap.values
+        .map((v) => (v is Map ? (v['name'] ?? '') : '').toString())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1a73e8),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          (b['name'] ?? 'Batch').toString(),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Summary
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              (b['name'] ?? '—').toString(),
+                              style: const TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: badge.$1,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              badge.$3,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: badge.$2),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isFrozen)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Row(
+                            children: [
+                              Icon(Icons.lock,
+                                  size: 16, color: Colors.blueGrey.shade700),
+                              const SizedBox(width: 6),
+                              Text('Frozen — read-only',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.blueGrey.shade700)),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      _summaryRow('Scans', '${b['scan_count'] ?? _scans.length}'),
+                      _summaryRow(
+                          'Created by', (b['created_by_name'] ?? '—').toString()),
+                      _summaryRow('Created', _fmtDate(b['created_at'])),
+                      if (isFrozen) ...[
+                        _summaryRow('Frozen', _fmtDate(b['frozen_at'])),
+                        _summaryRow('Frozen by',
+                            (b['frozen_by_name'] ?? '—').toString()),
+                      ],
+                      _summaryRow(
+                          'Participants',
+                          participantNames.isEmpty
+                              ? '—'
+                              : participantNames.join(', ')),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text('Scans (${_scans.length})',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.bold)),
+                ),
+                Expanded(child: _buildScansList()),
+              ],
+            ),
+    );
+  }
+
+  Widget _summaryRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(fontSize: 14, color: Colors.black87)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScansList() {
+    if (_error != null) {
+      return Center(
+          child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(_error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 15, color: Colors.red)),
+      ));
+    }
+    if (_scans.isEmpty) {
+      return const Center(
+          child: Text('No scans in this batch.',
+              style: TextStyle(fontSize: 16, color: Colors.grey)));
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      itemCount: _scans.length,
+      itemBuilder: (context, i) {
+        final s = _scans[i];
+        final isChild = (s['type'] ?? '').toString() == 'child';
+        final parents = (s['parent_roll_ids'] as List?)
+                ?.map((e) => e.toString())
+                .join(' + ') ??
+            '';
+        final title = isChild
+            ? (s['product_id']?.toString() ?? '—')
+            : (s['roll_id']?.toString() ?? '—');
+        final inSystem = s['was_already_in_system'] == true;
+        final isDup = s['duplicate_in_batch'] == true;
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(title,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace')),
+                    ),
+                    _scanChip(isChild ? 'CHILD' : 'PARENT',
+                        isChild ? Colors.purple : Colors.teal),
+                  ],
+                ),
+                if (isChild && parents.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Parents: $parents',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          color: Colors.black87)),
+                ],
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _scanChip(inSystem ? 'IN SYSTEM' : 'NEW',
+                        inSystem ? Colors.blue : Colors.green),
+                    if (isDup) _scanChip('DUPLICATE', Colors.red),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                    'Scanned by ${s['scanned_by_name'] ?? '—'} · '
+                    '${_fmtDate(s['scanned_at'])}',
+                    style: const TextStyle(fontSize: 13, color: Colors.black54)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _scanChip(String label, MaterialColor color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.shade100,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: color.shade800)),
     );
   }
 }
