@@ -348,7 +348,10 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
     setState(() => _submitting = false);
 
     if (res['success'] == true) {
-      _showMessage('Conversion submitted! New roll ${res['new_child_id'] ?? ''} created.', true);
+      _showMessage(
+          'Conversion submitted! New roll '
+          '${ParentValidation.childDisplayLabel(_newProductId, _sourceData?['parent_roll_ids'])} created.',
+          true);
       _clearForm();
     } else {
       _showMessage(res['detail']?.toString() ?? 'Error submitting conversion.', false);

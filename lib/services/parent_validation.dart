@@ -74,6 +74,44 @@ class ParentValidation {
     return (productId: pid, parentId: parent);
   }
 
+  /// Child roll display label (single source — §2.13, mirrors web
+  /// IMSValidation.childDisplayLabel). A child roll's internal id is the opaque
+  /// "CHILD-<product>-<timestamp>" string, meaningless to users; everywhere a child
+  /// is shown it must read as product + parent(s), e.g. "BVR-696000 · T26B20025M".
+  /// The internal id is kept only as a key/hover, NEVER as the visible label.
+  /// Returns product·parent(s), or just the product when parents are unknown.
+  static String childDisplayLabel(dynamic productId, dynamic parentRollIds) {
+    final pid = (productId == null || productId.toString().isEmpty)
+        ? '—'
+        : productId.toString();
+    final parents = <String>[];
+    if (parentRollIds is List) {
+      for (final p in parentRollIds) {
+        if (p != null && p.toString().isNotEmpty) parents.add(p.toString());
+      }
+    }
+    return parents.isEmpty ? pid : '$pid · ${parents.join(' + ')}';
+  }
+
+  /// True if a roll record is a child (by `type`, or a CHILD-… roll id).
+  /// Accepts an untyped [Map] — several history detail records are `Map` (dynamic).
+  static bool isChildRoll(Map? rec) {
+    if (rec == null) return false;
+    if (rec['type'] == 'child') return true;
+    return (rec['roll_id']?.toString() ?? '').toUpperCase().startsWith('CHILD-');
+  }
+
+  /// User-facing label for any roll record: product·parent for a child, the
+  /// natural roll id for a parent. Mirrors web IMSValidation.rollDisplayLabel.
+  static String rollDisplayLabel(Map? rec) {
+    if (rec == null) return '—';
+    if (isChildRoll(rec)) {
+      return childDisplayLabel(rec['product_id'], rec['parent_roll_ids']);
+    }
+    final rid = rec['roll_id']?.toString() ?? '';
+    return rid.isEmpty ? '—' : rid;
+  }
+
   /// Default roll lookup via GET /rolls/{id}. Returns null when not found.
   /// Normalizes the ID so a miscased reference resolves to the stored roll.
   static Future<Map<String, dynamic>?> defaultRollLookup(String rollId) async {

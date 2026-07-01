@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/roll_status.dart';
+import '../services/parent_validation.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -1222,9 +1223,13 @@ class _ProductionDetailScreen extends StatelessWidget {
             .toList() ??
         const <String>[];
     final productId = roll['product_id']?.toString() ?? '';
-    final displayRollId = productId.isEmpty
-        ? '—'
-        : '$productId-${parentList.join('-')}';
+    // Friendly child label: product · parent(s) (shared single source, §2.13) —
+    // never the internal CHILD-… id.
+    final displayRollId =
+        ParentValidation.childDisplayLabel(productId, parentList);
+    final titleLabel = displayRollId == '—'
+        ? (roll['roll_id']?.toString() ?? 'Production Detail')
+        : displayRollId;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -1233,7 +1238,7 @@ class _ProductionDetailScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          roll['roll_id']?.toString() ?? 'Production Detail',
+          titleLabel,
           style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -1244,8 +1249,7 @@ class _ProductionDetailScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _readField('Roll ID (system)', roll['roll_id']?.toString()),
-            _readField('Display Roll ID', displayRollId),
+            _readField('Roll ID', displayRollId),
             _readField('Product ID', productId),
             _readField('Product Name', product['product_name']?.toString()),
             _readField('Material Type',
@@ -1484,7 +1488,8 @@ class _ConversionDetailScreen extends StatelessWidget {
                 style: TextStyle(color: Colors.black54, fontSize: 12,
                     letterSpacing: 1.2, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            _readField('New Roll ID', conv['new_roll_id']?.toString()),
+            _readField('New Roll',
+                ParentValidation.childDisplayLabel(conv['new_product_id'], sourceParents)),
             _readField('New Product ID', conv['new_product_id']?.toString()),
             _readField('New Product Name', newProduct['product_name']?.toString()),
             _readField('Material', newProduct['material_type']?.toString()),
@@ -1497,7 +1502,8 @@ class _ConversionDetailScreen extends StatelessWidget {
                 style: TextStyle(color: Colors.black54, fontSize: 12,
                     letterSpacing: 1.2, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            _readField('Source Roll ID', conv['source_roll_id']?.toString()),
+            _readField('Source Roll',
+                ParentValidation.childDisplayLabel(conv['source_product_id'], sourceParents)),
             _readField('Source Product ID', conv['source_product_id']?.toString()),
             _readField('Source Product Name', sourceProduct['product_name']?.toString()),
             _readField('Source Material', sourceProduct['material_type']?.toString()),
@@ -1575,7 +1581,8 @@ class _StockInitialDetailScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          roll['roll_id']?.toString() ?? 'Stock Entry',
+          // product·parent for a child, natural id for a parent (shared source).
+          ParentValidation.rollDisplayLabel(roll),
           style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -1587,7 +1594,8 @@ class _StockInitialDetailScreen extends StatelessWidget {
         child: Column(
           children: isChild
               ? [
-                  _readField('Roll ID', roll['roll_id']?.toString()),
+                  _readField('Roll',
+                      ParentValidation.childDisplayLabel(roll['product_id'], parentList)),
                   _readField('Type', 'Child'),
                   _readField('Product ID', roll['product_id']?.toString()),
                   _readField(
