@@ -23,6 +23,10 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
   Map<String, dynamic>? _selectedCustomer;
   final Map<String, List<Map<String, dynamic>>> _customerCache = {};
   bool _loadingCustomers = false;
+  // §2.16 — persistent error state for a failed /txn/customers load. The 5s
+  // toast alone lets the user end up staring at a silently-empty picker once it
+  // dismisses; this drives an inline error + Retry that stays until resolved.
+  String? _customerLoadError;
   final _customerKey = GlobalKey<DropdownSearchState<Map<String, dynamic>>>();
 
   // Invoice
@@ -116,19 +120,24 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
 
   Future<void> _loadCustomers(String company) async {
     if (_customerCache.containsKey(company)) return;
-    setState(() => _loadingCustomers = true);
+    setState(() { _loadingCustomers = true; _customerLoadError = null; });
     final res = await ApiService.get('/txn/customers?company=$company');
-    // Bug #34 — only cache a SUCCESSFUL fetch. ApiService.get returns
+    // Bug #34 / §2.16 — only cache a SUCCESSFUL fetch. ApiService.get returns
     // {'error': ...} on a timeout / network failure / 401, in which case
     // `records` is absent. Caching an empty list there would trip the
     // `containsKey` guard above and permanently hide that company's
     // customers for the rest of the session (the cache also survives
-    // navigation via the in-memory FormStateCache). Leave it uncached so
-    // re-selecting the company retries.
+    // navigation via the in-memory FormStateCache). Leave it uncached AND
+    // record a persistent error so the picker never silently shows empty —
+    // the inline error + Retry (below) stays until the load succeeds.
     if (res['records'] is! List) {
       if (mounted) {
-        setState(() => _loadingCustomers = false);
-        _showMessage('Could not load customers. Tap the company again to retry.', false);
+        setState(() {
+          _loadingCustomers = false;
+          _customerLoadError =
+              'Could not load customers — check your connection and retry.';
+        });
+        _showMessage('Could not load customers. Tap Retry below.', false);
       }
       return;
     }
@@ -140,7 +149,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
         .toLowerCase()
         .compareTo((b['display_name'] ?? '').toString().toLowerCase()));
     _customerCache[company] = list;
-    if (mounted) setState(() => _loadingCustomers = false);
+    if (mounted) setState(() { _loadingCustomers = false; _customerLoadError = null; });
   }
 
   Future<void> _onCompanyChanged(String company) async {
@@ -151,6 +160,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     setState(() {
       _company = company;
       _selectedCustomer = null;
+      _customerLoadError = null; // drop any stale error from the prior company
       _lines.clear();
       _pendingFirstScan = null;
       _scanController.clear();
@@ -354,6 +364,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     setState(() {
       _company = null;
       _selectedCustomer = null;
+      _customerLoadError = null;
       _invoiceController.clear();
       _twoParent = false;
       _scanController.clear();
@@ -432,6 +443,34 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                         SizedBox(width: 10),
                         Text('Loading customers...'),
                       ]),
+                    ),
+                  // §2.16 — a failed load shows an actionable error + Retry that
+                  // persists (unlike the 5s toast), never a silent empty picker.
+                  if (!_loadingCustomers &&
+                      _customerLoadError != null &&
+                      _company != null)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        border: Border.all(color: Colors.red[200]!),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text('⚠ ${_customerLoadError!}',
+                                style: TextStyle(color: Colors.red[800])),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: () => _loadCustomers(_company!),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
                     ),
                   AbsorbPointer(
                     key: const Key('customerDropdown'),
