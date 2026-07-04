@@ -5,6 +5,10 @@ on:
   workflow_dispatch:
 jobs:
   build:
+    # LIVE (prod) channel — PROMOTION ONLY (Joe's release model, 2026-07-04):
+    # test runs ahead of live; live gets a release only as a deliberate act.
+    # Manual trigger only — a push to main must NEVER publish to live users.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -67,15 +71,15 @@ jobs:
           path: build/app/outputs/flutter-apk/app-prod-release.apk
 
   build-test-apk:
-    # Builds a test-environment APK that points at the test Cloud Run backend.
-    # Uses the `test` product flavor (applicationIdSuffix .test) so it installs
-    # alongside the prod APK on the same device with its own data + icon.
-    # Manual trigger only -- we no longer build the test APK on every push;
-    # normal pushes to main build the prod APK only.
-    if: github.event_name == 'workflow_dispatch'
+    # TEST channel — runs on EVERY push to main (and on manual dispatch).
+    # Builds the qa flavor (applicationIdSuffix .test, side-by-side install,
+    # TEST icon/theme) pointed at the test Cloud Run backend, and publishes
+    # it as a GitHub PRE-RELEASE tagged test-vX.Y.Z. The test app's update
+    # checker follows only test-v* tags; the live app uses /releases/latest,
+    # which never returns pre-releases — dev builds cannot reach live users.
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-java@v3
@@ -123,6 +127,18 @@ jobs:
         run: |
           mv build/app/outputs/flutter-apk/app-qa-release.apk \
              build/app/outputs/flutter-apk/app-test-release.apk
+      - name: Publish test channel pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          echo "Test channel version: $VERSION"
+          gh release delete "test-v$VERSION" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "test-v$VERSION" \
+            build/app/outputs/flutter-apk/app-test-release.apk \
+            --prerelease \
+            --title "Compleat IMS TEST v$VERSION" \
+            --notes "Test channel build $GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: app-test-release.apk

@@ -27,30 +27,47 @@ sets `appEnvironment` in `lib/services/api_service.dart`. When the value is
 not `prod`, the home screen renders an amber `<ENV> ENVIRONMENT` banner under
 the top bar so testers always know which backend the APK is hitting.
 
+TEST VISUAL IDENTITY (2026-07-04): when `APP_ENV=test` the app additionally
+renders (a) a light-red Material theme (seed #B91C1C replaces the blue
+#1a73e8) and (b) a red corner `TEST` ribbon on EVERY screen (Flutter Banner
+widget via `MaterialApp.builder` in `lib/main.dart`), and (c) the qa flavor
+carries a TEST-badged launcher icon (`android/app/src/qa/res/mipmap-*`,
+generated red-band overlays of the prod icon — flavor-scoped, prod builds
+cannot pick them up). All three are driven ONLY by the existing dart-define /
+flavor; the committed defaults render the normal blue prod look.
+
 ## Cloud Run
 - Prod project: project-f05aa3b5-e37d-4c19-a03
 - Test project: compleat-ims-test (separate, mirrored data; used by Patrol E2E)
 - Region: northamerica-northeast2 (not northeast1)
 - Service name: compleat-inventory-api (same in both projects)
 
-## Test Build / E2E APK
-GitHub Actions builds two APKs on every push to `main`:
+## Test Build / Release channels (Joe's release model, 2026-07-04)
+Test is the DEVELOPMENT instance and runs AHEAD of live. Live only gets a
+release as a deliberate promotion act.
 
-- Job `build` → `app-release.apk` → published as a GitHub Release (prod).
-- Job `build-test-apk` → `app-test-release.apk` → uploaded as a workflow
-  artifact only (no GitHub Release). This is the APK to install on E2E
-  hardware. It is built with `--dart-define=API_BASE=<test_url>` and
+- Job `build-test-apk` (qa flavor) runs on EVERY push to `main` (and on
+  dispatch) → `app-test-release.apk` → published as a GitHub PRE-RELEASE
+  tagged `test-vX.Y.Z`. Built with `--dart-define=API_BASE=<test_url>` and
   `--dart-define=APP_ENV=test`.
+- Job `build` (prod flavor) is `workflow_dispatch` ONLY → normal release
+  tagged `vX.Y.Z` with `--latest`. A push to main can NEVER publish to
+  live users; Joe triggers this manually when promoting.
 
-How to identify the test APK on a device:
-- Open the app and look at the top of the Home screen — a thin amber
-  `TEST ENVIRONMENT` strip appears below the blue header. Prod builds
-  show no such strip.
+Auto-update channels (`lib/services/update_service.dart`):
+- prod app → `/releases/latest` (GitHub never returns pre-releases there)
+  + rejects `test-v*` tags belt-and-braces.
+- test app (`APP_ENV=test`) → release list, newest `test-v*` tag only.
+So each app self-updates from its own channel only; after the first manual
+install of the test APK, it updates itself like the live app does.
 
-Side-by-side install with prod APK is NOT supported yet — both builds use
-`applicationId = com.compleat.compleat_mobile`, so installing the test APK
-replaces the prod APK and vice versa. Adding `applicationIdSuffix = ".test"`
-via Android build flavors is the right fix when this becomes a need.
+How to identify the test APK on a device: TEST-badged launcher icon,
+light-red theme, red corner `TEST` ribbon on every screen, plus the amber
+`TEST ENVIRONMENT` strip on Home.
+
+Side-by-side install IS supported (May 2026): the qa flavor uses
+`applicationIdSuffix ".test"` so test installs alongside prod with its own
+data and icon.
 
 ## Known API Endpoints
 - POST /auth/login

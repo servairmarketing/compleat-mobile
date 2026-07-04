@@ -3,30 +3,73 @@ import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'api_service.dart' show appEnvironment;
+
 class UpdateService {
   static const String _repoOwner = 'servairmarketing';
   static const String _repoName = 'compleat-mobile';
   static const String _githubApiBase = 'https://api.github.com';
 
+  // Release channels (two independent walls between them):
+  // - prod: /releases/latest, tags vX.Y.Z. GitHub's "latest" endpoint NEVER
+  //   returns pre-releases, and prod tags never carry the test- prefix, so
+  //   the live app cannot see test builds.
+  // - test (APP_ENV=test, qa flavor): newest release tagged test-vX.Y.Z
+  //   from the release LIST (pre-releases included there). The test app
+  //   only ever matches the test- prefix, so it cannot see live releases.
+  static const String _testTagPrefix = 'test-v';
+
   static Future<Map<String, dynamic>?> checkForUpdate() async {
     try {
       final dio = Dio();
-      final response = await dio.get(
-        '$_githubApiBase/repos/$_repoOwner/$_repoName/releases/latest',
-        options: Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
-      );
-      print('DEBUG GitHub API status: ${response.statusCode}');
-      print('DEBUG tag_name: ${response.data['tag_name']}');
-      if (response.statusCode != 200) return null;
-      final data = response.data;
-      final latestVersion = (data['tag_name'] as String).replaceAll('v', '');
+      final bool testChannel = appEnvironment == 'test';
+      String? latestVersion;
+      List? assets;
+
+      if (testChannel) {
+        final response = await dio.get(
+          '$_githubApiBase/repos/$_repoOwner/$_repoName/releases?per_page=30',
+          options:
+              Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
+        );
+        print('DEBUG GitHub API status (test channel): ${response.statusCode}');
+        if (response.statusCode != 200) return null;
+        for (final rel in (response.data as List)) {
+          final tag = rel['tag_name'] as String? ?? '';
+          if (tag.startsWith(_testTagPrefix)) {
+            latestVersion = tag.substring(_testTagPrefix.length);
+            assets = rel['assets'] as List;
+            break; // list is newest-first
+          }
+        }
+        if (latestVersion == null) return null;
+      } else {
+        final response = await dio.get(
+          '$_githubApiBase/repos/$_repoOwner/$_repoName/releases/latest',
+          options:
+              Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
+        );
+        print('DEBUG GitHub API status: ${response.statusCode}');
+        print('DEBUG tag_name: ${response.data['tag_name']}');
+        if (response.statusCode != 200) return null;
+        final data = response.data;
+        final tag = data['tag_name'] as String;
+        if (tag.startsWith(_testTagPrefix)) return null; // belt-and-braces
+        latestVersion = tag.replaceAll('v', '');
+        assets = data['assets'] as List;
+      }
+
       final info = await PackageInfo.fromPlatform();
       final currentVersion = info.version;
       print('DEBUG latestVersion: $latestVersion currentVersion: $currentVersion isNewer: ${_isNewer(latestVersion, currentVersion)}');
       if (_isNewer(latestVersion, currentVersion)) {
-        final assets = data['assets'] as List;
-        if (assets.isEmpty) return null;
-        final apkUrl = assets.first['browser_download_url'] as String;
+        if (assets == null || assets.isEmpty) return null;
+        // Pick the APK by name rather than blindly taking the first asset.
+        final apk = assets.firstWhere(
+          (a) => (a['name'] as String? ?? '').endsWith('.apk'),
+          orElse: () => assets!.first,
+        );
+        final apkUrl = apk['browser_download_url'] as String;
         return {'version': latestVersion, 'url': apkUrl};
       }
       return null;
