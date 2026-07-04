@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'change_password_screen.dart';
 import 'printer_settings_screen.dart';
+import '../brand.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -15,7 +16,7 @@ class SettingsScreen extends StatelessWidget {
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text('Settings'),
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
       ),
       body: SafeArea(
@@ -48,7 +49,7 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.lock_outline,
                 label: 'Change Password',
                 description: 'Update your account password',
-                color: const Color(0xFF1a73e8),
+                color: kBrandColor,
                 onTap: () => _navigate(context, const ChangePasswordScreen()),
               ),
             ],

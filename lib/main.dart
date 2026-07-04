@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/api_service.dart' show appEnvironment;
+import 'brand.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,9 +28,11 @@ class CompleatApp extends StatelessWidget {
       title: 'Com-Pleat IMS',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-            seedColor:
-                isTestEnv ? const Color(0xFFB91C1C) : const Color(0xFF1a73e8)),
+        // kBrandColor (lib/brand.dart) is the env-aware chrome colour; the
+        // screens' direct colour usages reference it too, so the whole app
+        // recolours together (fix for "theme not applied": screens painted
+        // the blue as hardcoded literals, bypassing the ColorScheme).
+        colorScheme: ColorScheme.fromSeed(seedColor: kBrandColor),
         useMaterial3: true,
         textTheme: const TextTheme(
           bodyLarge: TextStyle(fontSize: 18),

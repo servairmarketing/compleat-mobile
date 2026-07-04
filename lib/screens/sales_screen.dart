@@ -8,6 +8,7 @@ import '../services/scan_dedupe.dart';
 import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -391,7 +392,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Sales',
@@ -520,7 +521,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                               style: TextStyle(
                                   fontSize: 16,
                                   color: isSelected
-                                      ? const Color(0xFF1a73e8)
+                                      ? kBrandColor
                                       : Colors.black,
                                   fontWeight: isSelected
                                       ? FontWeight.bold
@@ -656,14 +657,14 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                       color: const Color(0xFFe8f0fe),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: const Color(0xFF1a73e8), width: 2),
+                          color: kBrandColor, width: 2),
                     ),
                     child: Row(children: [
                       Text('$_totalQty',
                           style: const TextStyle(
                               fontSize: 40,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF1a73e8))),
+                              color: kBrandColor)),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
@@ -715,7 +716,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                                       style: const TextStyle(
                                           fontSize: 20,
                                           fontWeight: FontWeight.bold,
-                                          color: Color(0xFF1a73e8))),
+                                          color: kBrandColor)),
                                   const SizedBox(width: 8),
                                   IconButton(
                                     icon: const Icon(Icons.close,
@@ -799,11 +800,11 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
             color: selected
-                ? const Color(0xFF1a73e8).withOpacity(0.12)
+                ? kBrandColor.withOpacity(0.12)
                 : Colors.white,
             border: Border.all(
                 color:
-                    selected ? const Color(0xFF1a73e8) : Colors.grey[300]!,
+                    selected ? kBrandColor : Colors.grey[300]!,
                 width: selected ? 2 : 1),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -813,7 +814,7 @@ class _SalesScreenState extends State<SalesScreen> with ScanDedupe {
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
                   color: selected
-                      ? const Color(0xFF1a73e8)
+                      ? kBrandColor
                       : Colors.grey[700])),
         ),
       ),

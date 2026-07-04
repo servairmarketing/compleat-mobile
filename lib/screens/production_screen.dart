@@ -13,6 +13,7 @@ import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import '../widgets/load_error_card.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class ProductionScreen extends StatefulWidget {
   const ProductionScreen({super.key});
@@ -783,7 +784,7 @@ class _ProductionScreenState extends State<ProductionScreen>
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text('Production', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -819,9 +820,9 @@ class _ProductionScreenState extends State<ProductionScreen>
               ),
             TabBar(
               controller: _tabController,
-              labelColor: const Color(0xFF1a73e8),
+              labelColor: kBrandColor,
               unselectedLabelColor: Colors.grey,
-              indicatorColor: const Color(0xFF1a73e8),
+              indicatorColor: kBrandColor,
               labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               tabs: const [
                 Tab(key: Key('labelPrintingTab'), icon: Icon(Icons.print, size: 22), text: 'Label Printing'),
@@ -958,7 +959,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 child: Text(item, style: TextStyle(
                   fontSize: 16,
-                  color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+                  color: isSelected ? kBrandColor : Colors.black,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 )),
               ),
@@ -1042,7 +1043,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                     label: Text(_lpPrinting ? 'Printing...' : 'Print Labels',
                       style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                      backgroundColor: kBrandColor, foregroundColor: Colors.white),
                   ),
                 ),
               ),
@@ -1186,12 +1187,12 @@ class _ProductionScreenState extends State<ProductionScreen>
             decoration: BoxDecoration(
               color: const Color(0xFFe8f0fe),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF1a73e8), width: 2),
+              border: Border.all(color: kBrandColor, width: 2),
             ),
             child: Row(
               children: [
                 Text('$_totalScanned',
-                  style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFF1a73e8))),
+                  style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: kBrandColor)),
                 const SizedBox(width: 16),
                 const Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1293,7 +1294,7 @@ class _ProductionScreenState extends State<ProductionScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('×${e.value['count']}',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1a73e8))),
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kBrandColor)),
                     const SizedBox(width: 8),
                     IconButton(
                       icon: const Icon(Icons.close, color: Colors.red),

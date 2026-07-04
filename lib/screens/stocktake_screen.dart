@@ -14,6 +14,7 @@ import '../widgets/save_print_clear_bar.dart';
 import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class StocktakeScreen extends StatefulWidget {
   const StocktakeScreen({super.key});
@@ -196,7 +197,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
           _ModeCard(
             key: const Key('initialEntryMode'),
             icon: Icons.add_box_rounded,
-            color: const Color(0xFF1a73e8),
+            color: kBrandColor,
             label: 'Initial Stock Entry',
             description: 'Add existing inventory to system. Writes to inventory.',
             onTap: () => setState(() => _mode = _StMode.initial),
@@ -247,7 +248,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
           _ModeCard(
             key: const Key('parentSubMode'),
             icon: Icons.inventory_2_rounded,
-            color: const Color(0xFF1a73e8),
+            color: kBrandColor,
             label: 'Parent Roll',
             description: 'Operate on parent rolls',
             onTap: () => setState(() => _sub = _StSub.parent),
@@ -385,7 +386,7 @@ Widget _stSimpleDropdown({
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Text(item, style: TextStyle(
           fontSize: 16,
-          color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+          color: isSelected ? kBrandColor : Colors.black,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
         )),
       ),

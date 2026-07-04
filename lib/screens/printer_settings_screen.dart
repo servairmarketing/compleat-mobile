@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/printer_service.dart';
+import '../brand.dart';
 
 enum PrinterStatus { checking, offline, ready, coverOpen, noPaper, paperJam, error }
 
@@ -144,7 +145,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Printer Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -225,7 +226,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                         icon: const Icon(Icons.save, size: 24),
                         label: const Text('Save', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1a73e8), foregroundColor: Colors.white),
+                          backgroundColor: kBrandColor, foregroundColor: Colors.white),
                       ),
                     ),
                   ),

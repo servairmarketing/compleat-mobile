@@ -9,6 +9,7 @@ import 'sales_screen.dart';
 import 'conversion_screen.dart';
 import 'stocktake_screen.dart';
 import 'history_screen.dart';
+import '../brand.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -127,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: const Color(0xFF1a73e8),
+              color: kBrandColor,
               child: Row(
                 children: [
                   Image.asset('assets/images/ComPleat_Logo_Mark.png',
@@ -192,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           key: const Key('menuCard_receive'),
                           icon: Icons.download_rounded, label: 'Receive',
                           description: 'Receive incoming parent rolls',
-                          color: const Color(0xFF1a73e8),
+                          color: kBrandColor,
                           onTap: () => _navigate(const ReceiveScreen())),
                     if (modules.contains('production') || isAdmin)
                       _MenuCard(

@@ -28,13 +28,20 @@ not `prod`, the home screen renders an amber `<ENV> ENVIRONMENT` banner under
 the top bar so testers always know which backend the APK is hitting.
 
 TEST VISUAL IDENTITY (2026-07-04): when `APP_ENV=test` the app additionally
-renders (a) a light-red Material theme (seed #B91C1C replaces the blue
-#1a73e8) and (b) a red corner `TEST` ribbon on EVERY screen (Flutter Banner
-widget via `MaterialApp.builder` in `lib/main.dart`), and (c) the qa flavor
-carries a TEST-badged launcher icon (`android/app/src/qa/res/mipmap-*`,
-generated red-band overlays of the prod icon — flavor-scoped, prod builds
-cannot pick them up). All three are driven ONLY by the existing dart-define /
-flavor; the committed defaults render the normal blue prod look.
+renders (a) a light-red Material theme and (b) a red corner `TEST` ribbon on
+EVERY screen (Flutter Banner widget via `MaterialApp.builder` in
+`lib/main.dart`), and (c) the qa flavor carries a TEST-badged launcher icon
+(`android/app/src/qa/res/mipmap-*`, generated red-band overlays of the prod
+icon — flavor-scoped, prod builds cannot pick them up). All are driven ONLY
+by the existing dart-define / flavor; committed defaults render prod blue.
+
+BRAND COLOUR RULE (v1.0.68 fix): screens must NEVER hardcode the brand blue
+`Color(0xFF1a73e8)` — use `kBrandColor` from `lib/brand.dart` (compile-time
+const: prod -> #1a73e8 blue, APP_ENV=test -> #B91C1C red, AA-checked). The
+original theme-seed-only approach didn't recolour screens because all
+AppBars/buttons hardcoded the blue literal (55 sites, all migrated).
+Semantic status tints (`Colors.blue.shadeX` chips in history/sales) are NOT
+brand chrome and stay unchanged in both environments.
 
 ## Cloud Run
 - Prod project: project-f05aa3b5-e37d-4c19-a03

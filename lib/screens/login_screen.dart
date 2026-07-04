@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import '../services/field_focus.dart';
 import 'forced_password_change_screen.dart';
 import 'home_screen.dart';
+import '../brand.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -107,7 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1a73e8),
+      backgroundColor: kBrandColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -194,7 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               key: const Key('signInButton'),
                               onPressed: _loading ? null : _login,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1a73e8),
+                                backgroundColor: kBrandColor,
                                 foregroundColor: Colors.white,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),

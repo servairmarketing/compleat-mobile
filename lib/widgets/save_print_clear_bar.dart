@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../brand.dart';
 
 /// Shared action bar for screens that save an entry and can *optionally* print
 /// a label for it. Replaces the old single "Save + Print" buttons so that
@@ -69,7 +70,7 @@ class SavePrintClearBar extends StatelessWidget {
                 style:
                     const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1a73e8),
+                backgroundColor: kBrandColor,
                 foregroundColor: Colors.white),
           ),
         ),

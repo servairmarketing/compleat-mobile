@@ -10,6 +10,7 @@ import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import '../widgets/load_error_card.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class ConversionScreen extends StatefulWidget {
   const ConversionScreen({super.key});
@@ -398,7 +399,7 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Conversion',
@@ -714,13 +715,13 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
           decoration: BoxDecoration(
             color: const Color(0xFFe8f0fe),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFF1a73e8), width: 2),
+            border: Border.all(color: kBrandColor, width: 2),
           ),
           child: Row(
             children: [
               Text('$_newRollsCount',
                   style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold,
-                      color: Color(0xFF1a73e8))),
+                      color: kBrandColor)),
               const SizedBox(width: 16),
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import 'home_screen.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class ForcedPasswordChangeScreen extends StatefulWidget {
   const ForcedPasswordChangeScreen({super.key});
@@ -124,7 +125,7 @@ class _ForcedPasswordChangeScreenState extends State<ForcedPasswordChangeScreen>
     return WillPopScope(
       onWillPop: () async => false,
       child: Scaffold(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         body: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -193,7 +194,7 @@ class _ForcedPasswordChangeScreenState extends State<ForcedPasswordChangeScreen>
                           child: ElevatedButton(
                             onPressed: _loading ? null : _submit,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1a73e8),
+                              backgroundColor: kBrandColor,
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),

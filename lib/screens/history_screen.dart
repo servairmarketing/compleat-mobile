@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import '../services/roll_status.dart';
 import '../services/parent_validation.dart';
 import '../widgets/load_error_card.dart';
+import '../brand.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -203,7 +204,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('History',
@@ -278,7 +279,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
-              color: selected ? const Color(0xFF1a73e8) : Colors.transparent,
+              color: selected ? kBrandColor : Colors.transparent,
               width: 3,
             ),
           ),
@@ -289,14 +290,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
           children: [
               Icon(icon,
                   size: 20,
-                  color: selected ? const Color(0xFF1a73e8) : Colors.grey),
+                  color: selected ? kBrandColor : Colors.grey),
               const SizedBox(width: 6),
               Text(label,
                   style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
                       color:
-                          selected ? const Color(0xFF1a73e8) : Colors.grey)),
+                          selected ? kBrandColor : Colors.grey)),
             ],
           ),
         ),
@@ -810,8 +811,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1a73e8) : Colors.white,
-            border: Border.all(color: const Color(0xFF1a73e8)),
+            color: selected ? kBrandColor : Colors.white,
+            border: Border.all(color: kBrandColor),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
@@ -820,7 +821,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: selected ? Colors.white : const Color(0xFF1a73e8),
+              color: selected ? Colors.white : kBrandColor,
             ),
           ),
         ),
@@ -1102,7 +1103,7 @@ class _PoRollsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1170,7 +1171,7 @@ class _RollDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1254,7 +1255,7 @@ class _ProductionDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1350,7 +1351,7 @@ class _SaleDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1415,7 +1416,7 @@ class _SaleDetailScreen extends StatelessWidget {
                               style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1a73e8))),
+                                  color: kBrandColor)),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -1488,7 +1489,7 @@ class _ConversionDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1597,7 +1598,7 @@ class _StockInitialDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -1757,7 +1758,7 @@ class _BatchDetailScreenState extends State<_BatchDetailScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(

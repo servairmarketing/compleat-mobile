@@ -10,6 +10,7 @@ import '../services/form_state_cache.dart';
 import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
+import '../brand.dart';
 
 class ReceiveScreen extends StatefulWidget {
   const ReceiveScreen({super.key});
@@ -333,7 +334,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1a73e8),
+        backgroundColor: kBrandColor,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Receive Parent Roll', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -507,7 +508,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                           label: Text(_submitting ? 'Saving...' : 'Receive Roll',
                             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1a73e8),
+                            backgroundColor: kBrandColor,
                             foregroundColor: Colors.white),
                         ),
                       ),
@@ -604,7 +605,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             child: Text(item, style: TextStyle(
               fontSize: 16,
-              color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+              color: isSelected ? kBrandColor : Colors.black,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             )),
           ),
@@ -656,7 +657,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             child: Text(item, style: TextStyle(
               fontSize: 16,
-              color: isSelected ? const Color(0xFF1a73e8) : Colors.black,
+              color: isSelected ? kBrandColor : Colors.black,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             )),
           ),
