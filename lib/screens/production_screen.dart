@@ -288,23 +288,24 @@ class _ProductionScreenState extends State<ProductionScreen>
     final id = _lpParent1.text.trim();
     if (id.isEmpty) { setState(() => _lpParentRoll1Data = null); return false; }
     setState(() => _lpValidatingParent = true);
-    final data = await _fetchParentRoll(id);
+    // §2.13 — route R1/R2/R2b/R3 through the SHARED validator (no per-screen
+    // re-impl). requireExist:true = production needs an existing, non-consumed
+    // parent. The lookupFn captures the fetched roll for the info panel / width.
+    Map<String, dynamic>? fetched;
+    final pv = await ParentValidation.validateParentSet(
+      [id],
+      lookupFn: (x) async { fetched = await _fetchParentRoll(x); return fetched; },
+      requireExist: true,
+    );
     setState(() => _lpValidatingParent = false);
-    if (data == null) {
+    if (!pv.ok) {
       _lpParent1.clear();
       setState(() => _lpParentRoll1Data = null);
-      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false);
-      return false;
-    }
-    final status = data['status']?.toString() ?? '';
-    if (status == 'consumed') {
-      _lpParent1.clear();
-      setState(() => _lpParentRoll1Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      _showMessage(pv.error!, false);
       return false;
     }
     setState(() {
-      _lpParentRoll1Data = data;
+      _lpParentRoll1Data = fetched;
       // Clear product selection when parent roll changes
       _lpSelectedProduct = null;
       _lpSelectedProductName = null;
@@ -321,47 +322,33 @@ class _ProductionScreenState extends State<ProductionScreen>
       _showMessage('Please validate Parent Roll ID 1 first.', false);
       return false;
     }
-    if (id == _lpParent1.text.trim()) {
-      _lpParent2.clear();
-      setState(() => _lpParentRoll2Data = null);
-      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false);
-      return false;
-    }
+    final p1id = _lpParent1.text.trim();
     setState(() => _lpValidatingParent = true);
-    final data = await _fetchParentRoll(id);
+    // §2.13 — SHARED validator over the full [p1, p2] set: R1 distinct, R2/R2b
+    // exist+not-consumed, R3 material+basis. Reuse the already-validated parent 1
+    // (no refetch); capture parent 2 for the info panel / width filtering.
+    Map<String, dynamic>? fetched2;
+    final pv = await ParentValidation.validateParentSet(
+      [p1id, id],
+      lookupFn: (x) async {
+        if (ParentValidation.normalizeRollId(x) ==
+            ParentValidation.normalizeRollId(p1id)) {
+          return _lpParentRoll1Data;
+        }
+        fetched2 = await _fetchParentRoll(x);
+        return fetched2;
+      },
+      requireExist: true,
+    );
     setState(() => _lpValidatingParent = false);
-    if (data == null) {
+    if (!pv.ok) {
       _lpParent2.clear();
       setState(() => _lpParentRoll2Data = null);
-      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false);
-      return false;
-    }
-    final status = data['status']?.toString() ?? '';
-    if (status == 'consumed') {
-      _lpParent2.clear();
-      setState(() => _lpParentRoll2Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
-      return false;
-    }
-    // Cross-validate against Roll 1 (material + basis weight only — width is independent)
-    final mt1 = _lpParentRoll1Data!['material_type']?.toString() ?? '';
-    final mt2 = data['material_type']?.toString() ?? '';
-    if (mt1.isNotEmpty && mt2.isNotEmpty && mt1 != mt2) {
-      _lpParent2.clear();
-      setState(() => _lpParentRoll2Data = null);
-      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false);
-      return false;
-    }
-    final bw1 = _lpParentRoll1Data!['basis_weight']?.toString() ?? '';
-    final bw2 = data['basis_weight']?.toString() ?? '';
-    if (bw1.isNotEmpty && bw2.isNotEmpty && bw1 != bw2) {
-      _lpParent2.clear();
-      setState(() => _lpParentRoll2Data = null);
-      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false);
+      _showMessage(pv.error!, false);
       return false;
     }
     setState(() {
-      _lpParentRoll2Data = data;
+      _lpParentRoll2Data = fetched2;
       // Clear product selection so filter re-applies with new min width
       _lpSelectedProduct = null;
       _lpSelectedProductName = null;
@@ -373,23 +360,24 @@ class _ProductionScreenState extends State<ProductionScreen>
     final id = _rpParent1.text.trim();
     if (id.isEmpty) { setState(() => _rpParentRoll1Data = null); return false; }
     setState(() => _rpValidatingParent = true);
-    final data = await _fetchParentRoll(id);
+    // §2.13 — route R1/R2/R2b/R3 through the SHARED validator (no per-screen
+    // re-impl). requireExist:true = production needs an existing, non-consumed
+    // parent. The lookupFn captures the fetched roll for the info panel / width.
+    Map<String, dynamic>? fetched;
+    final pv = await ParentValidation.validateParentSet(
+      [id],
+      lookupFn: (x) async { fetched = await _fetchParentRoll(x); return fetched; },
+      requireExist: true,
+    );
     setState(() => _rpValidatingParent = false);
-    if (data == null) {
+    if (!pv.ok) {
       _rpParent1.clear();
       setState(() => _rpParentRoll1Data = null);
-      _showMessage('Parent Roll ID 1 not found. Please check the ID and try again.', false);
-      return false;
-    }
-    final status = data['status']?.toString() ?? '';
-    if (status == 'consumed') {
-      _rpParent1.clear();
-      setState(() => _rpParentRoll1Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
+      _showMessage(pv.error!, false);
       return false;
     }
     setState(() {
-      _rpParentRoll1Data = data;
+      _rpParentRoll1Data = fetched;
       // Clear scanned items + pairing state when parent roll changes — a
       // different parent means this is a new batch.
       _scannedItems = {};
@@ -409,46 +397,32 @@ class _ProductionScreenState extends State<ProductionScreen>
       _showMessage('Please validate Parent Roll ID 1 first.', false);
       return false;
     }
-    if (id == _rpParent1.text.trim()) {
-      _rpParent2.clear();
-      setState(() => _rpParentRoll2Data = null);
-      _showMessage('Parent Roll 2 cannot be the same as Parent Roll 1.', false);
-      return false;
-    }
+    final p1id = _rpParent1.text.trim();
     setState(() => _rpValidatingParent = true);
-    final data = await _fetchParentRoll(id);
+    // §2.13 — SHARED validator over the full [p1, p2] set: R1 distinct, R2/R2b
+    // exist+not-consumed, R3 material+basis. Reuse the already-validated parent 1
+    // (no refetch); capture parent 2 for the info panel.
+    Map<String, dynamic>? fetched2;
+    final pv = await ParentValidation.validateParentSet(
+      [p1id, id],
+      lookupFn: (x) async {
+        if (ParentValidation.normalizeRollId(x) ==
+            ParentValidation.normalizeRollId(p1id)) {
+          return _rpParentRoll1Data;
+        }
+        fetched2 = await _fetchParentRoll(x);
+        return fetched2;
+      },
+      requireExist: true,
+    );
     setState(() => _rpValidatingParent = false);
-    if (data == null) {
+    if (!pv.ok) {
       _rpParent2.clear();
       setState(() => _rpParentRoll2Data = null);
-      _showMessage('Parent Roll ID 2 not found. Please check the ID and try again.', false);
+      _showMessage(pv.error!, false);
       return false;
     }
-    final status = data['status']?.toString() ?? '';
-    if (status == 'consumed') {
-      _rpParent2.clear();
-      setState(() => _rpParentRoll2Data = null);
-      _showMessage('Parent Roll $id has already been fully consumed and cannot be used for production.', false);
-      return false;
-    }
-    // Cross-validate against Roll 1 (material + basis weight only — width is independent)
-    final mt1 = _rpParentRoll1Data!['material_type']?.toString() ?? '';
-    final mt2 = data['material_type']?.toString() ?? '';
-    if (mt1.isNotEmpty && mt2.isNotEmpty && mt1 != mt2) {
-      _rpParent2.clear();
-      setState(() => _rpParentRoll2Data = null);
-      _showMessage('Material type mismatch: Roll 1 is $mt1 but Roll 2 is $mt2. Both parent rolls must be the same material type.', false);
-      return false;
-    }
-    final bw1 = _rpParentRoll1Data!['basis_weight']?.toString() ?? '';
-    final bw2 = data['basis_weight']?.toString() ?? '';
-    if (bw1.isNotEmpty && bw2.isNotEmpty && bw1 != bw2) {
-      _rpParent2.clear();
-      setState(() => _rpParentRoll2Data = null);
-      _showMessage('Basis weight mismatch: Roll 1 is $bw1 lbs but Roll 2 is $bw2 lbs. Both parent rolls must have the same basis weight.', false);
-      return false;
-    }
-    setState(() => _rpParentRoll2Data = data);
+    setState(() => _rpParentRoll2Data = fetched2);
     return true;
   }
 
