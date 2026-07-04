@@ -7,6 +7,7 @@ import '../services/parent_validation.dart';
 import '../services/local_db.dart';
 import '../services/field_focus.dart';
 import '../services/form_state_cache.dart';
+import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 
@@ -50,6 +51,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String? _selectedBasisWeight;
   String? _selectedWidth;
   bool _loading = false;
+  // §2.16 — set when a masters load fails AND no offline cache filled the gap,
+  // so the dropdowns would otherwise be silently empty. Drives a Retry card.
+  String? _mastersLoadError;
   bool _submitting = false;
   String? _message;
   bool _messageSuccess = false;
@@ -132,7 +136,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Future<void> _loadMasters() async {
-    setState(() => _loading = true);
+    setState(() { _loading = true; _mastersLoadError = null; });
     try {
       final vRes = await ApiService.get('/masters/vendors');
       final wRes = await ApiService.get('/masters/widths');
@@ -145,10 +149,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         return;
       }
 
+      // §2.16 — track whether any fetch failed to return its data (network /
+      // timeout / server error). The offline cache still fills in below; we
+      // only surface an error if a failure left a dropdown genuinely empty.
+      bool anyFailed = false;
+
       if (vRes['records'] != null) {
         await LocalDb.cacheMasters('vendors', jsonEncode(vRes['records']));
         setState(() => _vendors = List<Map>.from(vRes['records']));
       } else {
+        anyFailed = true;
         final cached = await LocalDb.getCachedMasters('vendors');
         if (cached != null) setState(() => _vendors = List<Map>.from(jsonDecode(cached)));
       }
@@ -157,6 +167,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         await LocalDb.cacheMasters('widths', jsonEncode(wRes['values']));
         setState(() => _widths = List<String>.from(wRes['values']));
       } else {
+        anyFailed = true;
         final cached = await LocalDb.getCachedMasters('widths');
         if (cached != null) setState(() => _widths = List<String>.from(jsonDecode(cached)));
       }
@@ -165,6 +176,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         await LocalDb.cacheMasters('material_types', jsonEncode(mRes['values']));
         setState(() => _materialTypes = List<String>.from(mRes['values']));
       } else {
+        anyFailed = true;
         final cached = await LocalDb.getCachedMasters('material_types');
         if (cached != null) setState(() => _materialTypes = List<String>.from(jsonDecode(cached)));
       }
@@ -173,13 +185,25 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         await LocalDb.cacheMasters('basis_weights', jsonEncode(bRes['values']));
         setState(() => _basisWeights = List<String>.from(bRes['values']));
       } else {
+        anyFailed = true;
         final cached = await LocalDb.getCachedMasters('basis_weights');
         if (cached != null) setState(() => _basisWeights = List<String>.from(jsonDecode(cached)));
       }
 
-      setState(() => _loading = false);
+      final anyEmpty = _vendors.isEmpty || _widths.isEmpty ||
+          _materialTypes.isEmpty || _basisWeights.isEmpty;
+      setState(() {
+        _loading = false;
+        _mastersLoadError = (anyFailed && anyEmpty)
+            ? 'Could not load some dropdowns — check your connection and retry.'
+            : null;
+      });
     } catch (e) {
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _mastersLoadError =
+            'Could not load dropdowns — check your connection and retry.';
+      });
     }
   }
 
@@ -339,6 +363,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     child: Text(_message!, style: TextStyle(
                       color: _messageSuccess ? Colors.green[800] : Colors.red[800],
                       fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+
+                if (_mastersLoadError != null)
+                  LoadErrorCard(
+                    message: _mastersLoadError!,
+                    onRetry: _loadMasters,
                   ),
 
                 _buildField('Roll ID', _rollIdController,

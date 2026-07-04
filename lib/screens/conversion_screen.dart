@@ -8,6 +8,7 @@ import '../services/form_state_cache.dart';
 import '../services/scan_dedupe.dart';
 import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
+import '../widgets/load_error_card.dart';
 import 'validation_dialog.dart';
 
 class ConversionScreen extends StatefulWidget {
@@ -50,6 +51,9 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
 
   List<Map> _products = [];
   bool _loadingProducts = false;
+  // §2.16 — set when the product-master load fails and no cache filled it, so
+  // client-side validation lookups would silently have no data. Drives a Retry card.
+  String? _productsLoadError;
 
   final _scrollController = ScrollController();
 
@@ -100,16 +104,24 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
   }
 
   Future<void> _loadProducts() async {
-    setState(() => _loadingProducts = true);
+    setState(() { _loadingProducts = true; _productsLoadError = null; });
     final res = await ApiService.get('/masters/products');
+    bool failed = false;
     if (res['records'] != null) {
       await LocalDb.cacheMasters('products', jsonEncode(res['records']));
       setState(() => _products = List<Map>.from(res['records']));
     } else {
+      failed = true;  // network / timeout / server error
       final cached = await LocalDb.getCachedMasters('products');
       if (cached != null) setState(() => _products = List<Map>.from(jsonDecode(cached)));
     }
-    setState(() => _loadingProducts = false);
+    setState(() {
+      _loadingProducts = false;
+      // §2.16 — only error if the failure left the product list genuinely empty.
+      _productsLoadError = (failed && _products.isEmpty)
+          ? 'Could not load products — check your connection and retry.'
+          : null;
+    });
   }
 
   void _showMessage(String msg, bool success) {
@@ -405,6 +417,15 @@ class _ConversionScreenState extends State<ConversionScreen> with ScanDedupe {
                       style: TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold,
                         color: _messageSuccess ? Colors.green[800] : Colors.red[800]),
+                    ),
+                  ),
+                if (_productsLoadError != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: LoadErrorCard(
+                      message: _productsLoadError!,
+                      onRetry: _loadProducts,
+                      margin: EdgeInsets.zero,
                     ),
                   ),
                 Expanded(

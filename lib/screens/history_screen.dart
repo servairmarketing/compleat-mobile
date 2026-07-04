@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/roll_status.dart';
 import '../services/parent_validation.dart';
+import '../widgets/load_error_card.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -37,6 +38,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int _stockSubTab = 0;           // 0 = Initial Entries, 1 = Batches
 
   bool _loading = false;
+  // §2.16 — true when any of the history loads failed, so a load failure is
+  // distinguishable from a genuinely empty history (drives a Retry banner).
+  bool _loadError = false;
   int _selectedTab = 0;
 
   @override
@@ -53,7 +57,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _loadHistory() async {
-    setState(() => _loading = true);
+    setState(() { _loading = true; _loadError = false; });
 
     final rRes = await ApiService.get('/rolls/parents?limit=200');
     final pRes = await ApiService.get('/production/list?limit=50');
@@ -63,6 +67,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final siRes = await ApiService.get('/stocktake/initial');
     final sbRes = await ApiService.get('/api/stocktake/batches');
     final profile = await ApiService.getUserProfile();
+
+    // §2.16 — ApiService.get returns {'error': ...} on timeout/network/session
+    // failure. If any list failed, flag it so a failed load isn't silently
+    // shown as an empty history; the Retry banner + pull-to-refresh recover it.
+    final anyFailed = [rRes, pRes, mRes, sRes, cRes, siRes, sbRes]
+        .any((r) => r['error'] != null);
 
     if (rRes['rolls'] != null) {
       _allRolls = List<Map>.from(rRes['rolls']);
@@ -114,6 +124,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _groups = _computeGroups();
       _filteredGroups = _filterGroups(_groups);
       _loading = false;
+      _loadError = anyFailed;
     });
   }
 
@@ -230,6 +241,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ),
                 ),
               ),
+              if (_loadError)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: LoadErrorCard(
+                    message: 'Could not load some history — check your connection and retry.',
+                    onRetry: _loadHistory,
+                    margin: EdgeInsets.zero,
+                  ),
+                ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _loadHistory,
@@ -1854,12 +1874,20 @@ class _BatchDetailScreenState extends State<_BatchDetailScreen> {
 
   Widget _buildScansList() {
     if (_error != null) {
+      // §2.16 — error state must offer a Retry, not just a dead message.
       return Center(
           child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text(_error!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 15, color: Colors.red)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('⚠ ${_error!}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 15, color: Colors.red)),
+            const SizedBox(height: 12),
+            TextButton(onPressed: _loadScans, child: const Text('Retry')),
+          ],
+        ),
       ));
     }
     if (_scans.isEmpty) {

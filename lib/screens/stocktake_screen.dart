@@ -11,6 +11,7 @@ import '../services/field_focus.dart';
 import '../services/parent_validation.dart';
 import '../widgets/two_parent_scan_fields.dart';
 import '../widgets/save_print_clear_bar.dart';
+import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 
@@ -1657,7 +1658,7 @@ class _StocktakeBatchListScreenState extends State<StocktakeBatchListScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
                 children: [
                   if (_error != null)
-                    _stMessage(_error, false),
+                    LoadErrorCard(message: _error!, onRetry: _load),  // §2.16 — Retry, not a dead message
                   _sectionHeader('Open — tap to join', _open.length),
                   if (_open.isEmpty) _emptyNote('No open batches. Tap "New Batch" to start one.'),
                   ..._open.map((b) => _batchCard(b, resume: false)),
