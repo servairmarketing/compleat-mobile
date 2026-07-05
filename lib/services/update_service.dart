@@ -34,12 +34,17 @@ class UpdateService {
         );
         print('DEBUG GitHub API status (test channel): ${response.statusCode}');
         if (response.statusCode != 200) return null;
+        // The release list is NOT reliably newest-first (observed live:
+        // v1.0.66 listed above test-v1.0.68), so scan every test-v tag and
+        // keep the highest version instead of breaking on the first match.
         for (final rel in (response.data as List)) {
           final tag = rel['tag_name'] as String? ?? '';
           if (tag.startsWith(_testTagPrefix)) {
-            latestVersion = tag.substring(_testTagPrefix.length);
-            assets = rel['assets'] as List;
-            break; // list is newest-first
+            final v = tag.substring(_testTagPrefix.length);
+            if (latestVersion == null || _isNewer(v, latestVersion)) {
+              latestVersion = v;
+              assets = rel['assets'] as List;
+            }
           }
         }
         if (latestVersion == null) return null;
@@ -60,7 +65,9 @@ class UpdateService {
       }
 
       final info = await PackageInfo.fromPlatform();
-      final currentVersion = info.version;
+      // qa flavor appends versionNameSuffix "-test" (e.g. "1.0.67-test");
+      // strip any suffix so the numeric compare sees plain X.Y.Z.
+      final currentVersion = info.version.split('-').first;
       print('DEBUG latestVersion: $latestVersion currentVersion: $currentVersion isNewer: ${_isNewer(latestVersion, currentVersion)}');
       if (_isNewer(latestVersion, currentVersion)) {
         if (assets == null || assets.isEmpty) return null;
@@ -80,8 +87,11 @@ class UpdateService {
   }
 
   static bool _isNewer(String latest, String current) {
-    final l = latest.split('.').map(int.parse).toList();
-    final c = current.split('.').map(int.parse).toList();
+    // tryParse guard: a malformed component must degrade to 0, never throw —
+    // an exception here is swallowed by checkForUpdate's catch and shows the
+    // user a false "you are on the latest version".
+    final l = latest.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    final c = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
     for (int i = 0; i < 3; i++) {
       final lv = i < l.length ? l[i] : 0;
       final cv = i < c.length ? c[i] : 0;
