@@ -65,8 +65,24 @@ Auto-update channels (`lib/services/update_service.dart`):
 - prod app → `/releases/latest` (GitHub never returns pre-releases there)
   + rejects `test-v*` tags belt-and-braces.
 - test app (`APP_ENV=test`) → release list, newest `test-v*` tag only.
+  "Newest" = HIGHEST version among `test-v*` pre-releases, NOT list order
+  (GitHub list order isn't guaranteed newest-first across re-publishes).
 So each app self-updates from its own channel only; after the first manual
 install of the test APK, it updates itself like the live app does.
+
+_isNewer SUFFIX FIX (v1.0.69+70, commit 3168bc4): the qa flavor's
+`versionNameSuffix "-test"` made the installed version read `X.Y.Z-test`,
+which crashed `_isNewer`'s int parse → the test app never saw updates
+(silent false negative). `update_service.dart` now strips a `-suffix`
+before comparing and guards every part with `int.tryParse` (malformed → 0).
+Keep both behaviours if you ever touch the version-compare logic.
+
+VERIFIED end-to-end 2026-07-05: Joe's TC22 self-updated 1.0.69 → 1.0.70
+from the test channel (prompt → download → install).
+
+DEFERRED (Joe, 2026-07-05): separate version numbering for test vs live
+channels — both build from the same pubspec `version:` line today; test
+simply runs ahead. Revisit if promotion versioning gets confusing.
 
 How to identify the test APK on a device: TEST-badged launcher icon,
 light-red theme, red corner `TEST` ribbon on every screen, plus the amber
