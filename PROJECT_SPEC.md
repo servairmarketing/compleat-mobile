@@ -243,6 +243,18 @@ Mobile builds happen via GitHub Actions, NEVER locally.
              gains 5 endpoints under /stocktake (parent, child, scan, list,
              lookup_child). Production / Sales / Conversion / Receive / Login /
              Printer Settings / History screens NOT modified.
+2026-09-21 — Initial Stock Entry — Child: Length and Weight REMOVED (Joe's ruling;
+             v1.0.71+72). Form is now Parent Roll ID(s) [Two-Parent toggle],
+             Product, Quantity, Status, Notes. Same removal in the Annual Count
+             inline unknown-child form (it reuses /stocktake/child). Why: a
+             child's length always equals its product master's length (a
+             different length gets its own product ID, by policy), weight has no
+             source, and nothing in the system reads either field. The backend
+             silently ignores length/weight still sent by an older app. History
+             stock-entry child detail: Length falls back to the product master;
+             Weight shows only on older records that carry one. Parent initial
+             entry UNCHANGED (still Length + Weight). Nothing else on the Stock
+             Take screen touched.
 
 ## 9. Direct Cloud Shell Changes Log
 Changes made directly in Cloud Shell (bypassing Claude Code) must be

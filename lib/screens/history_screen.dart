@@ -1630,8 +1630,14 @@ class _StockInitialDetailScreen extends StatelessWidget {
                       (roll['basis_weight'] ?? product['basis_weight'])
                           ?.toString()),
                   _readField('Quantity', roll['quantity']?.toString()),
-                  _readField('Length (ft)', roll['length']?.toString()),
-                  _readField('Weight (lbs)', roll['weight']?.toString()),
+                  // Initial Entry child no longer captures length/weight
+                  // (2026-09-21): Length falls back to the product master (same
+                  // as the production child detail above); Weight has no source,
+                  // so it shows only on older records that carry one.
+                  _readField('Length (ft)',
+                      (roll['length'] ?? product['length'])?.toString()),
+                  if (roll['weight'] != null)
+                    _readField('Weight (lbs)', roll['weight'].toString()),
                   _readField('Parent Roll(s)',
                       parentList.isEmpty ? '—' : parentList.join('\n')),
                   _readField(

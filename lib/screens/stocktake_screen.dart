@@ -841,8 +841,6 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   final _parent1Ctrl = TextEditingController();
   final _parent2Ctrl = TextEditingController();
   final _qtyCtrl = TextEditingController();
-  final _lengthCtrl = TextEditingController();
-  final _weightCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _parent1Focus = FocusNode();
 
@@ -877,8 +875,6 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       _parent1Ctrl.text = snap['parent1'] ?? '';
       _parent2Ctrl.text = snap['parent2'] ?? '';
       _qtyCtrl.text = snap['qty'] ?? '';
-      _lengthCtrl.text = snap['length'] ?? '';
-      _weightCtrl.text = snap['weight'] ?? '';
       _notesCtrl.text = snap['notes'] ?? '';
       _twoParent = snap['twoParent'] ?? false;
       _productId = snap['productId'];
@@ -897,8 +893,6 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       'parent1': _parent1Ctrl.text,
       'parent2': _parent2Ctrl.text,
       'qty': _qtyCtrl.text,
-      'length': _lengthCtrl.text,
-      'weight': _weightCtrl.text,
       'notes': _notesCtrl.text,
       'twoParent': _twoParent,
       'productId': _productId,
@@ -906,8 +900,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       'status': _status,
     });
     _parent1Ctrl.dispose(); _parent2Ctrl.dispose();
-    _qtyCtrl.dispose(); _lengthCtrl.dispose();
-    _weightCtrl.dispose(); _notesCtrl.dispose();
+    _qtyCtrl.dispose(); _notesCtrl.dispose();
     _parent1Focus.dispose();
     super.dispose();
   }
@@ -924,16 +917,6 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       issues.add('Quantity is required');
     } else if (qty < 1) {
       issues.add('Quantity must be 1 or more');
-    }
-    if (_lengthCtrl.text.trim().isEmpty) {
-      issues.add('Length is required');
-    } else if (double.tryParse(_lengthCtrl.text.trim()) == null) {
-      issues.add('Length must be a number');
-    }
-    if (_weightCtrl.text.trim().isEmpty) {
-      issues.add('Weight is required');
-    } else if (double.tryParse(_weightCtrl.text.trim()) == null) {
-      issues.add('Weight must be a number');
     }
     if (issues.isNotEmpty) {
       await showValidationDialog(context, issues);
@@ -958,12 +941,12 @@ class _InitialChildFormState extends State<_InitialChildForm> {
       FieldFocus.revealBanner(_bannerKey);
       return;
     }
+    // No length/weight (Joe's ruling 2026-09-21): a child's length is its product
+    // master's length, weight has no source, and nothing reads either field.
     final res = await ApiService.post('/stocktake/child', {
       'parent_roll_ids': parents,
       'product_id': _productId,
       'quantity': qty,
-      'length': double.tryParse(_lengthCtrl.text) ?? 0,
-      'weight': double.tryParse(_weightCtrl.text) ?? 0,
       'status': _status,
       'notes': _notesCtrl.text.trim(),
     });
@@ -1027,8 +1010,7 @@ class _InitialChildFormState extends State<_InitialChildForm> {
   // Clears entry fields only (used after a successful save).
   void _clear() {
     _parent1Ctrl.clear(); _parent2Ctrl.clear();
-    _qtyCtrl.clear(); _lengthCtrl.clear();
-    _weightCtrl.clear(); _notesCtrl.clear();
+    _qtyCtrl.clear(); _notesCtrl.clear();
     setState(() {
       _productId = null; _productName = null;
       _status = 'in_stock';
@@ -1131,25 +1113,11 @@ class _InitialChildFormState extends State<_InitialChildForm> {
               },
             )),
             const SizedBox(height: 14),
-            Row(children: [
-              Expanded(
-                child: _stField('Quantity *', _qtyCtrl,
-                    widgetKey: const Key('stocktakeQtyField'),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _stField('Length (ft) *', _lengthCtrl,
-                    widgetKey: const Key('stocktakeLengthField'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.next),
-              ),
-            ]),
-            const SizedBox(height: 14),
-            _stField('Weight (lbs) *', _weightCtrl,
-                widgetKey: const Key('stocktakeWeightField'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            // Quantity is the last typed required field (Length/Weight removed
+            // 2026-09-21), so it takes the keyboard's Done action Weight used to have.
+            _stField('Quantity *', _qtyCtrl,
+                widgetKey: const Key('stocktakeQtyField'),
+                keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stStatusDropdown(
@@ -1790,8 +1758,6 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
   String _pendingChildProduct = '';
   List<String> _pendingChildParents = [];
   final _cQtyCtrl = TextEditingController();
-  final _cLengthCtrl = TextEditingController();
-  final _cWeightCtrl = TextEditingController();
   final _cNotesCtrl = TextEditingController();
 
   bool _submitting = false;
@@ -1853,7 +1819,7 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
   void dispose() {
     _scanCtrl.dispose(); _scanFocus.dispose();
     _poCtrl.dispose(); _pLengthCtrl.dispose(); _pWeightCtrl.dispose(); _pNotesCtrl.dispose();
-    _cQtyCtrl.dispose(); _cLengthCtrl.dispose(); _cWeightCtrl.dispose(); _cNotesCtrl.dispose();
+    _cQtyCtrl.dispose(); _cNotesCtrl.dispose();
     super.dispose();
   }
 
@@ -2046,10 +2012,6 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
       setState(() { _message = 'Quantity must be 1 or more.'; _ok = false; _warn = false; });
       return;
     }
-    if (_cLengthCtrl.text.trim().isEmpty || _cWeightCtrl.text.trim().isEmpty) {
-      setState(() { _message = 'Length and Weight are required.'; _ok = false; _warn = false; });
-      return;
-    }
     setState(() => _submitting = true);
     final res = await _postScan({
       'type': 'child',
@@ -2060,8 +2022,6 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
         'parent_roll_ids': _pendingChildParents,
         'product_id': _pendingChildProduct,
         'quantity': qty,
-        'length': double.tryParse(_cLengthCtrl.text) ?? 0,
-        'weight': double.tryParse(_cWeightCtrl.text) ?? 0,
         'notes': _cNotesCtrl.text.trim(),
       },
     });
@@ -2071,7 +2031,7 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
       final label = '$_pendingChildProduct / ${_pendingChildParents.join(' + ')}';
       setState(() {
         _showChildForm = false; _pendingChildProduct = ''; _pendingChildParents = [];
-        _cQtyCtrl.clear(); _cLengthCtrl.clear(); _cWeightCtrl.clear(); _cNotesCtrl.clear();
+        _cQtyCtrl.clear(); _cNotesCtrl.clear();
       });
       _afterRecorded(res, 'child', label);
       _scanFocus.requestFocus();
@@ -2431,18 +2391,9 @@ class _StocktakeBatchScanScreenState extends State<StocktakeBatchScanScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(children: [
-              Expanded(child: _stField('Quantity *', _cQtyCtrl,
-                  keyboardType: TextInputType.number, textInputAction: TextInputAction.next)),
-              const SizedBox(width: 12),
-              Expanded(child: _stField('Length (ft) *', _cLengthCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  textInputAction: TextInputAction.next)),
-            ]),
-            const SizedBox(height: 14),
-            _stField('Weight (lbs) *', _cWeightCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                textInputAction: TextInputAction.done),
+            // No Length/Weight (Joe's ruling 2026-09-21) — same as Initial Stock Entry Child.
+            _stField('Quantity *', _cQtyCtrl,
+                keyboardType: TextInputType.number, textInputAction: TextInputAction.done),
             const SizedBox(height: 14),
             _stField('Notes', _cNotesCtrl, multiline: true),
             const SizedBox(height: 24),
