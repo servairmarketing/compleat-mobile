@@ -12,10 +12,55 @@ import 'login_screen.dart';
 import 'validation_dialog.dart';
 import '../brand.dart';
 
+/// Receive Parent Roll — header + rapid roll entry (Joe's ruling 2026-09-24).
+///
+/// A paper delivery is many rolls of one variety, so the screen is two parts:
+///
+///   1. DELIVERY HEADER (top card), filled once:
+///      - Vendor + PO Number: FIXED for the delivery once the first roll saves
+///        (dropdown/field lock; "New delivery" clears + unlocks).
+///      - Material Type / Basis Weight / Width: set at the start, EDITABLE
+///        mid-delivery — rolls saved AFTER a change carry the new values
+///        (every save posts the header values current at that moment).
+///   2. ROLL ENTRY (second card), repeated per roll:
+///      Roll ID (required) → Length (ft, optional) → Weight (lbs, optional).
+///      Scan/Enter on Roll ID → duplicate check → cursor to Length; Enter on
+///      Length → Weight (empty allowed); Enter on Weight → the roll SAVES at
+///      once with the header, haptic pulse + green flash, it appears in the
+///      running list below with the delivery count, cursor back to Roll ID.
+///      Per-roll Undo (own receive, in stock, no children, within 4 h — the
+///      server enforces it via DELETE /rolls/{id}/receive).
+///
+/// PO Number is OPTIONAL (ruling 2026-09-24, matches PROJECT_SPEC); Length +
+/// Weight are OPTIONAL; Roll ID is REQUIRED on this client (the server still
+/// auto-generates for old clients). kBrandColor only.
 class ReceiveScreen extends StatefulWidget {
   const ReceiveScreen({super.key});
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
+}
+
+class _SessionRoll {
+  final String rollId;
+  final String? materialType;
+  final String? basisWeight;
+  final String? width;
+  final double? length;
+  final double? weight;
+  final DateTime savedAt;
+  bool undone;
+  _SessionRoll({required this.rollId, this.materialType, this.basisWeight, this.width,
+      this.length, this.weight, required this.savedAt, this.undone = false});
+
+  Map<String, dynamic> toJson() => {
+        'rollId': rollId, 'materialType': materialType, 'basisWeight': basisWeight,
+        'width': width, 'length': length, 'weight': weight,
+        'savedAt': savedAt.toIso8601String(), 'undone': undone,
+      };
+  static _SessionRoll fromJson(Map m) => _SessionRoll(
+        rollId: m['rollId'] ?? '', materialType: m['materialType'], basisWeight: m['basisWeight'],
+        width: m['width'], length: (m['length'] as num?)?.toDouble(), weight: (m['weight'] as num?)?.toDouble(),
+        savedAt: DateTime.tryParse(m['savedAt'] ?? '') ?? DateTime.now(), undone: m['undone'] == true);
 }
 
 class _ReceiveScreenState extends State<ReceiveScreen> {
@@ -59,19 +104,29 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String? _message;
   bool _messageSuccess = false;
 
+  // Delivery session (2026-09-24): Vendor + PO lock after the first save;
+  // the running list is this delivery's rolls, newest first.
+  bool _headerLocked = false;
+  final List<_SessionRoll> _sessionRolls = [];
+  bool _flash = false;           // green flash on the roll card after a save
+  String? _undoingRollId;        // row whose Undo is in flight
+
   // Bug #6 — inline duplicate Roll ID check.
   String? _rollIdError;          // shown under the Roll ID field
   String _lastCheckedRollId = '';// avoid hitting the API for unchanged value
   bool _rollIdChecking = false;
 
-  // Bug #14 — in-memory form-state cache key for this screen.
+  // Bug #14 — in-memory form-state cache key for this screen. The whole
+  // delivery (header, lock, running list, half-typed roll) survives nav-away.
   static const _cacheKey = 'receive';
+
+  int get _liveCount => _sessionRolls.where((r) => !r.undone).length;
 
   @override
   void initState() {
     super.initState();
     _loadMasters();
-    // Bug #14 — restore any in-progress entry preserved on nav-away.
+    // Bug #14 — restore any in-progress delivery preserved on nav-away.
     final snap = FormStateCache.read(_cacheKey);
     if (snap != null) {
       _rollIdController.text = snap['rollId'] ?? '';
@@ -83,9 +138,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedMaterialType = snap['materialType'];
       _selectedBasisWeight = snap['basisWeight'];
       _selectedWidth = snap['width'];
+      _headerLocked = snap['headerLocked'] == true;
+      final rolls = snap['sessionRolls'];
+      if (rolls is List) {
+        _sessionRolls.addAll(rolls.whereType<Map>().map(_SessionRoll.fromJson));
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _rollIdFocusNode.requestFocus();
+      if (!mounted) return;
+      // Header first when the delivery is not set up yet; otherwise straight to the scan field.
+      if (_selectedVendor == null && !_headerLocked) {
+        _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
+      } else {
+        _rollIdFocusNode.requestFocus();
+      }
     });
     // Check for duplicate Roll ID when the field loses focus (typed entry).
     // Scan-completed events fire onSubmitted, which is wired separately.
@@ -98,7 +164,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   @override
   void dispose() {
-    // Bug #14 — snapshot the current entry before disposing controllers so
+    // Bug #14 — snapshot the current delivery before disposing controllers so
     // returning to the screen restores it. In-memory only — never persisted.
     FormStateCache.write(_cacheKey, {
       'rollId': _rollIdController.text,
@@ -110,6 +176,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       'materialType': _selectedMaterialType,
       'basisWeight': _selectedBasisWeight,
       'width': _selectedWidth,
+      'headerLocked': _headerLocked,
+      'sessionRolls': _sessionRolls.map((r) => r.toJson()).toList(),
     });
     _rollIdController.dispose();
     _poController.dispose();
@@ -208,38 +276,40 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  Future<void> _checkRollIdDuplicate(String rollId) async {
+  /// Resolves true when the Roll ID is present and not a duplicate.
+  Future<bool> _checkRollIdDuplicate(String rollId) async {
     rollId = ParentValidation.normalizeRollId(rollId);
     if (rollId.isEmpty) {
-      // Empty is allowed in Receive — server auto-generates.
+      // Roll ID is REQUIRED on this client; an empty field is reported at
+      // save time (validation dialog), not as an inline error while scanning.
       if (_rollIdError != null) setState(() => _rollIdError = null);
       _lastCheckedRollId = '';
-      return;
+      return false;
     }
-    if (rollId == _lastCheckedRollId) return;
+    if (rollId == _lastCheckedRollId) return _rollIdError == null;
     _lastCheckedRollId = rollId;
     setState(() => _rollIdChecking = true);
     final res = await ApiService.get('/rolls/$rollId');
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() => _rollIdChecking = false);
     // /rolls/{id} returns {"roll": {...}} on hit, {"detail": "...not found."} on
     // 404. Anything else (network error / session_expired) we silently ignore;
     // the server-side check at submit time is the final guard.
     if (res['roll'] != null) {
       // Only set the error if the field hasn't been edited since.
-      if (_rollIdController.text.trim() == rollId) {
+      if (ParentValidation.normalizeRollId(_rollIdController.text) == rollId) {
         setState(() => _rollIdError =
             'Roll ID already exists. Please scan a different roll or correct the value.');
         // Bug #10 — keep focus ON the Roll ID field when a duplicate is
-        // detected so the operator can immediately edit or re-scan, instead
-        // of having auto-advance leave them stranded on Vendor.
+        // detected so the operator can immediately edit or re-scan.
         _rollIdFocusNode.requestFocus();
       }
-    } else {
-      if (_rollIdController.text.trim() == rollId) {
-        setState(() => _rollIdError = null);
-      }
+      return false;
     }
+    if (ParentValidation.normalizeRollId(_rollIdController.text) == rollId) {
+      setState(() => _rollIdError = null);
+    }
+    return true;
   }
 
   void _onRollIdChanged(String value) {
@@ -251,21 +321,27 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _lastCheckedRollId = '';
   }
 
-  Future<void> _submit() async {
+  List<String> _headerIssues() {
     final issues = <String>[];
     if (_selectedVendor == null) issues.add('Vendor is required');
-    if (_poController.text.trim().isEmpty) issues.add('PO Number is required');
     if (_selectedMaterialType == null) issues.add('Material Type is required');
     if (_selectedBasisWeight == null) issues.add('Basis Weight is required');
     if (_selectedWidth == null) issues.add('Width is required');
-    if (_lengthController.text.trim().isEmpty) {
-      issues.add('Length is required');
-    } else if (double.tryParse(_lengthController.text.trim()) == null) {
+    return issues;
+  }
+
+  /// Save ONE roll with the header values current now.
+  Future<void> _submit() async {
+    if (_submitting) return;
+    final issues = _headerIssues();
+    final rollId = ParentValidation.normalizeRollId(_rollIdController.text);
+    final lengthText = _lengthController.text.trim();
+    final weightText = _weightController.text.trim();
+    if (rollId.isEmpty) issues.add('Roll ID is required — scan or type the roll');
+    if (lengthText.isNotEmpty && double.tryParse(lengthText) == null) {
       issues.add('Length must be a number');
     }
-    if (_weightController.text.trim().isEmpty) {
-      issues.add('Weight is required');
-    } else if (double.tryParse(_weightController.text.trim()) == null) {
+    if (weightText.isNotEmpty && double.tryParse(weightText) == null) {
       issues.add('Weight must be a number');
     }
     if (_rollIdError != null) {
@@ -275,40 +351,91 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       await showValidationDialog(context, issues);
       return;
     }
-    setState(() => _submitting = true);
-    final rollId = ParentValidation.normalizeRollId(_rollIdController.text);
+    setState(() { _submitting = true; _message = null; });
+    final po = _poController.text.trim();
     final payload = {
-      'roll_id': rollId.isEmpty ? null : rollId,
+      'roll_id': rollId,
       'vendor_id': _selectedVendor,
-      'po_number': _poController.text.trim(),
+      'po_number': po.isEmpty ? null : po,                       // optional (ruling 2026-09-24)
       'material_type': _selectedMaterialType,
       'basis_weight': _selectedBasisWeight,
       'width': double.tryParse(_selectedWidth ?? ''),
-      'length': double.tryParse(_lengthController.text),
-      'weight': double.tryParse(_weightController.text),
+      'length': lengthText.isEmpty ? null : double.tryParse(lengthText),   // optional
+      'weight': weightText.isEmpty ? null : double.tryParse(weightText),   // optional
       'notes': _notesController.text.trim(),
     };
     final res = await ApiService.post('/rolls/receive', payload);
+    if (!mounted) return;
     if (res['success'] == true) {
-      final id = res['roll_id'] ?? _rollIdController.text.trim();
-      setState(() { _message = 'Roll $id received successfully!'; _messageSuccess = true; });
-      _clearForm();
+      final id = (res['roll_id'] ?? rollId).toString();
+      setState(() {
+        _headerLocked = true;               // Vendor + PO fixed from the first save
+        _sessionRolls.insert(0, _SessionRoll(
+          rollId: id, materialType: _selectedMaterialType, basisWeight: _selectedBasisWeight,
+          width: _selectedWidth, length: payload['length'] as double?, weight: payload['weight'] as double?,
+          savedAt: DateTime.now()));
+        _message = '✔ $id saved — $_liveCount this delivery';
+        _messageSuccess = true;
+        _submitting = false;
+      });
+      _confirmSaved();
+      _clearRollFields();
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted && _messageSuccess) setState(() => _message = null);
       });
     } else {
-      setState(() { _message = res['detail'] ?? 'Error submitting.'; _messageSuccess = false; });
+      setState(() {
+        _message = ApiService.readableDetail(res, 'Error submitting.');
+        _messageSuccess = false;
+        _submitting = false;
+      });
     }
-    setState(() => _submitting = false);
   }
 
-  void _clearForm() {
-    // Bug #14 — explicit Clear (and post-submit reset) drops the cached
-    // snapshot so re-entering the screen starts blank.
+  // Confirmation: haptic pulse + green flash on the roll card (no sound
+  // dependency — Joe's ruling 2026-09-24).
+  void _confirmSaved() {
+    HapticFeedback.mediumImpact();
+    setState(() => _flash = true);
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _flash = false);
+    });
+  }
+
+  /// Roll-only reset — the header (and its lock) is untouched; cursor back to Roll ID.
+  void _clearRollFields() {
+    _rollIdController.clear();
+    _lengthController.clear();
+    _weightController.clear();
+    _notesController.clear();
+    setState(() => _rollIdError = null);
+    _lastCheckedRollId = '';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _rollIdFocusNode.requestFocus();
+    });
+  }
+
+  /// Finish this delivery: clear everything, unlock Vendor + PO, empty the list.
+  Future<void> _newDelivery() async {
+    if (_liveCount > 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Start a new delivery?'),
+          content: Text('The $_liveCount roll(s) already saved stay received — only this screen resets.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: kBrandColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true), child: const Text('New delivery')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
     FormStateCache.clear(_cacheKey);
     _rollIdController.clear();
     _poController.clear();
-    _selectedWidth = null;
     _lengthController.clear();
     _weightController.clear();
     _notesController.clear();
@@ -316,7 +443,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedVendor = null;
       _selectedMaterialType = null;
       _selectedBasisWeight = null;
+      _selectedWidth = null;
+      _headerLocked = false;
+      _sessionRolls.clear();
       _rollIdError = null;
+      _message = null;
     });
     _lastCheckedRollId = '';
     FocusScope.of(context).unfocus();
@@ -325,8 +456,50 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _rollIdFocusNode.requestFocus();
+      if (mounted) _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
     });
+  }
+
+  /// Per-roll undo — the server enforces: own receive, in stock, no children,
+  /// within 4 h; anything else comes back 4xx with a readable reason.
+  Future<void> _undo(_SessionRoll r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Undo ${r.rollId}?'),
+        content: const Text('The roll record is removed from Receiving.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: kBrandColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true), child: const Text('Undo')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _undoingRollId = r.rollId);
+    final res = await ApiService.delete('/rolls/${Uri.encodeComponent(r.rollId)}/receive');
+    if (!mounted) return;
+    setState(() {
+      _undoingRollId = null;
+      if (res['success'] == true) {
+        r.undone = true;
+        _message = '↩ ${r.rollId} undone — $_liveCount this delivery';
+        _messageSuccess = true;
+      } else {
+        _message = 'Could not undo: ${ApiService.readableDetail(res, 'unknown error')}';
+        _messageSuccess = false;
+      }
+    });
+    _rollIdFocusNode.requestFocus();
+  }
+
+  String _headerSummary() {
+    if (_selectedVendor == null) return '';
+    final po = _poController.text.trim();
+    return '${_selectedVendor}${po.isEmpty ? '' : ' · PO $po'} · now '
+        '${_selectedMaterialType ?? '?'} / ${_selectedBasisWeight ?? '?'} / '
+        '${_selectedWidth == null ? '?' : '$_selectedWidth"'}';
   }
 
   @override
@@ -338,6 +511,15 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Receive Parent Roll', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        actions: [
+          TextButton.icon(
+            key: const Key('newDeliveryButton'),
+            onPressed: _newDelivery,
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
+            icon: const Icon(Icons.add, size: 20),
+            label: const Text('New delivery'),
+          ),
+        ],
       ),
       body: _loading
         ? const Center(child: CircularProgressIndicator())
@@ -372,36 +554,19 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     onRetry: _loadMasters,
                   ),
 
-                _buildField('Roll ID', _rollIdController,
-                    widgetKey: const Key('rollIdField'),
-                    hint: 'Auto-generated if empty',
-                    focusNode: _rollIdFocusNode,
-                    inputFormatters: const [UpperCaseRollIdFormatter()],
-                    keyboardType: TextInputType.emailAddress,
-                    // Bug #10 — `done` (not `next`) so Flutter's built-in
-                    // focus-advance can't race ahead of the duplicate check.
-                    textInputAction: TextInputAction.done,
-                    onChanged: _onRollIdChanged,
-                    errorText: _rollIdError,
-                    onSubmitted: (val) async {
-                      // Bug #10 — wait for the duplicate check, then either
-                      // stay put (duplicate) or advance to Vendor.
-                      await _checkRollIdDuplicate(val.trim());
-                      if (!mounted) return;
-                      if (_rollIdError != null) {
-                        _rollIdFocusNode.requestFocus();
-                        return;
-                      }
-                      _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
-                    }),
+                // ── 1. DELIVERY HEADER ─────────────────────────────────────
+                _sectionTitle('Delivery', trailing: _headerLocked
+                    ? const _Chip(text: '🔒 Vendor & PO locked', color: Color(0xFFFFF8E1), fg: Color(0xFF5C4500))
+                    : null),
+                const SizedBox(height: 10),
+
+                _buildVendorDropdown(enabled: !_headerLocked),
                 const SizedBox(height: 14),
 
-                _buildVendorDropdown(),
-                const SizedBox(height: 14),
-
-                _buildField('PO Number', _poController,
+                _buildField('PO Number (optional)', _poController,
                     widgetKey: const Key('poNumberField'),
                     focusNode: _poFocusNode,
+                    readOnly: _headerLocked,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     onSubmitted: (_) => _focusAndOpenDropdown(_materialTypeFocusNode, _materialTypeDropdownKey)),
@@ -424,6 +589,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedBasisWeight = null;
                       }
                     });
+                    // Mid-delivery edit: go back to scanning; initial setup: continue the header.
+                    if (_headerLocked) { _rollIdFocusNode.requestFocus(); return; }
                     _focusAndOpenDropdown(_basisWeightFocusNode, _basisWeightDropdownKey);
                   },
                 ),
@@ -446,83 +613,141 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedMaterialType = null;
                       }
                     });
+                    if (_headerLocked) { _rollIdFocusNode.requestFocus(); return; }
                     _focusAndOpenDropdown(_widthFocusNode, _widthDropdownKey);
                   },
                 ),
                 const SizedBox(height: 14),
 
-                Row(children: [
-                  Expanded(
-                    child: _buildSimpleDropdown(
-                      widgetKey: const Key('widthDropdown'),
-                      label: 'Width (in) *',
-                      items: _widths,
-                      value: _selectedWidth,
-                      focusNode: _widthFocusNode,
-                      dropdownKey: _widthDropdownKey,
-                      onChanged: (v) {
-                        setState(() => _selectedWidth = v);
-                        FieldFocus.advance(context, target: _lengthFocusNode);
-                      },
-                    ),
+                _buildSimpleDropdown(
+                  widgetKey: const Key('widthDropdown'),
+                  label: 'Width (in) *',
+                  items: _widths,
+                  value: _selectedWidth,
+                  focusNode: _widthFocusNode,
+                  dropdownKey: _widthDropdownKey,
+                  onChanged: (v) {
+                    setState(() => _selectedWidth = v);
+                    FieldFocus.advance(context, target: _rollIdFocusNode);
+                  },
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _headerLocked
+                      ? 'Material, basis weight and width can still be changed — rolls saved after the change carry the new values.'
+                      : 'Fill the delivery once, then scan roll after roll below.',
+                  style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 22),
+
+                // ── 2. ROLL ENTRY ──────────────────────────────────────────
+                _sectionTitle('Roll entry', subtitle: 'scan → Enter → Enter → Enter'),
+                const SizedBox(height: 10),
+                AnimatedContainer(
+                  key: const Key('rollCard'),
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _flash ? const Color(0xFFE8F5E9) : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _flash ? Colors.green : Colors.black12, width: _flash ? 2 : 1),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildField('Length (ft) *', _lengthController,
-                        widgetKey: const Key('lengthField'),
-                        focusNode: _lengthFocusNode,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        textInputAction: TextInputAction.next,
-                        onSubmitted: (_) => FieldFocus.advance(context, target: _weightFocusNode)),
-                  ),
-                ]),
-                const SizedBox(height: 14),
-
-                _buildField('Weight (lbs) *', _weightController,
-                    widgetKey: const Key('weightField'),
-                    focusNode: _weightFocusNode,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.done,
-                    hint: 'Overall weight of the roll',
-                    onSubmitted: (_) => FieldFocus.advance(context, target: _submitFocusNode)),
-                const SizedBox(height: 14),
-
-                _buildField('Notes', _notesController,
-                    focusNode: _notesFocusNode,
-                    multiline: true),
-                const SizedBox(height: 24),
-
-                Row(children: [
-                  Expanded(
-                    child: Focus(
-                      focusNode: _submitFocusNode,
-                      child: SizedBox(
-                        height: 56,
-                        child: ElevatedButton.icon(
-                          key: const Key('submitButton'),
-                          onPressed: (_submitting || _rollIdError != null) ? null : _submit,
-                          icon: _submitting
-                            ? const SizedBox(width: 20, height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.download_rounded, size: 24),
-                          label: Text(_submitting ? 'Saving...' : 'Receive Roll',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: kBrandColor,
-                            foregroundColor: Colors.white),
+                  child: Column(children: [
+                    _buildField('Roll ID *', _rollIdController,
+                        widgetKey: const Key('rollIdField'),
+                        hint: 'Scan or type the roll ID',
+                        focusNode: _rollIdFocusNode,
+                        inputFormatters: const [UpperCaseRollIdFormatter()],
+                        keyboardType: TextInputType.emailAddress,
+                        // Bug #10 — `done` (not `next`) so Flutter's built-in
+                        // focus-advance can't race ahead of the duplicate check.
+                        textInputAction: TextInputAction.done,
+                        onChanged: _onRollIdChanged,
+                        errorText: _rollIdError,
+                        onSubmitted: (val) async {
+                          // Scan → duplicate check → Length (stay put on a duplicate).
+                          final ok = await _checkRollIdDuplicate(val.trim());
+                          if (!mounted) return;
+                          if (!ok) { _rollIdFocusNode.requestFocus(); return; }
+                          FieldFocus.advance(context, target: _lengthFocusNode);
+                        }),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Expanded(
+                        child: _buildField('Length (ft)', _lengthController,
+                            widgetKey: const Key('lengthField'),
+                            hint: 'optional',
+                            focusNode: _lengthFocusNode,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textInputAction: TextInputAction.next,
+                            // Enter on an empty Length just moves on.
+                            onSubmitted: (_) => FieldFocus.advance(context, target: _weightFocusNode)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildField('Weight (lbs)', _weightController,
+                            widgetKey: const Key('weightField'),
+                            hint: 'optional',
+                            focusNode: _weightFocusNode,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textInputAction: TextInputAction.done,
+                            // Enter on Weight (empty allowed) SAVES the roll.
+                            onSubmitted: (_) => _submit()),
+                      ),
+                    ]),
+                    const SizedBox(height: 14),
+                    _buildField('Notes (this roll)', _notesController,
+                        focusNode: _notesFocusNode,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _submit()),
+                    const SizedBox(height: 16),
+                    Row(children: [
+                      Expanded(
+                        child: Focus(
+                          focusNode: _submitFocusNode,
+                          child: SizedBox(
+                            height: 56,
+                            child: ElevatedButton.icon(
+                              key: const Key('submitButton'),
+                              onPressed: (_submitting || _rollIdError != null) ? null : _submit,
+                              icon: _submitting
+                                ? const SizedBox(width: 20, height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Icon(Icons.download_rounded, size: 24),
+                              label: Text(_submitting ? 'Saving...' : 'Receive Roll',
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: kBrandColor,
+                                foregroundColor: Colors.white),
+                            ),
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        height: 56,
+                        child: OutlinedButton(
+                          key: const Key('clearRollButton'),
+                          onPressed: _clearRollFields,
+                          child: const Text('Clear roll', style: TextStyle(fontSize: 18)),
+                        ),
+                      ),
+                    ]),
+                  ]),
+                ),
+
+                // ── 3. RUNNING LIST ────────────────────────────────────────
+                if (_sessionRolls.isNotEmpty) ...[
+                  const SizedBox(height: 22),
+                  _sectionTitle('This delivery',
+                      trailing: _Chip(text: '$_liveCount', color: kBrandColor, fg: Colors.white, key: const Key('sessionCount'))),
+                  if (_headerSummary().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 6),
+                      child: Text(_headerSummary(), style: const TextStyle(fontSize: 13, color: Colors.black54)),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    height: 56,
-                    child: OutlinedButton(
-                      onPressed: _clearForm,
-                      child: const Text('Clear', style: TextStyle(fontSize: 18)),
-                    ),
-                  ),
-                ]),
+                  ..._sessionRolls.asMap().entries.map((e) => _sessionRow(_sessionRolls.length - e.key, e.value)),
+                ],
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -530,9 +755,64 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
+  Widget _sectionTitle(String text, {String? subtitle, Widget? trailing}) {
+    return Row(children: [
+      Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87)),
+      if (subtitle != null) ...[
+        const SizedBox(width: 8),
+        Text('— $subtitle', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+      ],
+      const Spacer(),
+      if (trailing != null) trailing,
+    ]);
+  }
+
+  Widget _sessionRow(int n, _SessionRoll r) {
+    final muted = TextStyle(fontSize: 13, color: r.undone ? Colors.black38 : Colors.black54,
+        decoration: r.undone ? TextDecoration.lineThrough : null);
+    String fmt(double? v) => v == null ? '—' : (v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString());
+    return Container(
+      key: Key('sessionRow-${r.rollId}'),
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+      decoration: BoxDecoration(
+        color: r.undone ? const Color(0xFFF5F5F5) : const Color(0xFFF7F9FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Row(children: [
+        SizedBox(width: 26, child: Text('$n', style: muted)),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(r.rollId, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace',
+                color: r.undone ? Colors.black38 : Colors.black87,
+                decoration: r.undone ? TextDecoration.lineThrough : null)),
+            Text('${r.materialType ?? '—'} / ${r.basisWeight ?? '—'} / ${r.width == null ? '—' : '${r.width}"'}'
+                '  ·  L ${fmt(r.length)}  ·  W ${fmt(r.weight)}'
+                '  ·  ${r.savedAt.hour.toString().padLeft(2, '0')}:${r.savedAt.minute.toString().padLeft(2, '0')}',
+                style: muted),
+          ]),
+        ),
+        if (r.undone)
+          Text('undone', style: muted)
+        else
+          SizedBox(
+            height: 36,
+            child: OutlinedButton(
+              key: Key('undo-${r.rollId}'),
+              onPressed: _undoingRollId == null ? () => _undo(r) : null,
+              child: _undoingRollId == r.rollId
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Undo'),
+            ),
+          ),
+      ]),
+    );
+  }
+
   Widget _buildField(String label, TextEditingController controller,
       {bool autofocus = false, String? hint,
-       FocusNode? focusNode, bool multiline = false,
+       FocusNode? focusNode, bool multiline = false, bool readOnly = false,
        TextInputType? keyboardType, TextInputAction? textInputAction,
        Function(String)? onSubmitted, Function(String)? onChanged,
        List<TextInputFormatter>? inputFormatters,
@@ -542,6 +822,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
+      readOnly: readOnly,
       keyboardType: multiline
           ? TextInputType.multiline
           : (keyboardType ?? TextInputType.text),
@@ -553,18 +834,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       minLines: multiline ? 1 : null,
       onSubmitted: onSubmitted,
       onChanged: onChanged,
-      style: const TextStyle(fontSize: 18),
+      style: TextStyle(fontSize: 18, color: readOnly ? Colors.black54 : Colors.black87),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         errorText: errorText,
+        filled: readOnly,
+        fillColor: readOnly ? const Color(0xFFF3F4F6) : null,
         border: const OutlineInputBorder(),
         contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
       ),
     );
   }
 
-  Widget _buildVendorDropdown() {
+  Widget _buildVendorDropdown({bool enabled = true}) {
     final itemList = _vendors.map((v) => '${v['vendor_id']} — ${v['vendor_name']}').toList();
     final selectedItem = _selectedVendor != null
         ? _vendors.where((v) => v['vendor_id']?.toString() == _selectedVendor).isNotEmpty
@@ -576,6 +859,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       focusNode: _vendorFocusNode,
       child: DropdownSearch<String>(
         key: _vendorDropdownKey,
+        enabled: enabled,
         // Bug #30 — scroll the field up so the popup opens below it.
         onBeforePopupOpening: (_) =>
             FieldFocus.ensureRoomForDropdown(_vendorDropdownKey.currentContext),
@@ -669,4 +953,17 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       ),
     );
   }
+}
+
+class _Chip extends StatelessWidget {
+  final String text;
+  final Color color;
+  final Color fg;
+  const _Chip({required this.text, required this.color, required this.fg, super.key});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+        child: Text(text, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.bold)),
+      );
 }

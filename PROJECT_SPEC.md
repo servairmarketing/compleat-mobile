@@ -108,21 +108,37 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen
-Fields (in this order):
-1. Roll ID — text input, optional, hint "Auto-generated if empty"
-2. Vendor — dropdown from /masters/vendors, required
-3. PO Number — free text, optional
-4. Material Type — dropdown of unique material_type values from /masters/products, required
-5. Basis Weight — dropdown of unique basis_weight values from /masters/products, required
-6. Width (in) — dropdown of unique width values from /masters/products, required
-7. Length (ft) — number input, required
-8. Weight (lbs) — number input, required
-9. Notes — multiline text, optional
+### Receive Parent Roll Screen — header + rapid roll entry (Joe's ruling 2026-09-24, v1.0.72)
+A delivery is many rolls of one variety: fill the shared info once, then scan roll after roll.
+
+1. DELIVERY HEADER (top; set once):
+   - Vendor — dropdown from /masters/vendors, required. FIXED for the delivery once the first roll saves.
+   - PO Number — free text, OPTIONAL. FIXED with Vendor once the first roll saves.
+   - Material Type / Basis Weight / Width (in) — dropdowns from the dedicated masters
+     endpoints, required. Set at the start, EDITABLE mid-delivery: rolls saved AFTER a
+     change carry the new values (each save posts the header values current at that moment).
+   - "New delivery" (app bar) clears everything and unlocks Vendor + PO (confirm when rolls
+     were already saved — they stay received; only the screen resets).
+2. ROLL ENTRY (repeats per roll): Roll ID → Length (ft) → Weight (lbs) → Notes.
+   - Roll ID — REQUIRED (scan or type; uppercase; inline duplicate check on Enter/blur; a
+     duplicate keeps focus on the field). The server still auto-generates an id for OLD
+     clients that send none.
+   - Length + Weight — OPTIONAL; Enter on an empty field skips it; a roll may save with
+     either or both blank (stored null; every display shows "—").
+   - Focus flow: Roll ID Enter → duplicate check → Length → Enter → Weight → Enter → SAVE
+     (POST /rolls/receive with the header) → haptic pulse + green flash on the roll card +
+     the roll appears in the running list with the delivery count → cursor back to Roll ID.
+   - Running list ("This delivery"): this delivery's rolls newest first with Material /
+     Basis / Width / L / W / time and an Undo per row. Undo = DELETE /rolls/{id}/receive;
+     the SERVER enforces the guardrails (own receive, in stock, no children, within 4 h)
+     and answers 4xx with a readable reason.
+   - No sound dependency (ruling): confirmation = haptic + flash only.
 
 Rules:
-- All 3 dropdowns fetch fresh from API on every screen load
-- No hardcoded lists anywhere
+- All dropdowns fetch fresh from API on every screen load; no hardcoded lists anywhere
+- The in-memory FormStateCache snapshot carries the whole delivery (header, lock, list,
+  half-typed roll) across nav-away; "New delivery" clears it
+- Errors render via ApiService.readableDetail (a 422 list prints as sentences, never raw)
 
 ### Printer Settings Screen
 - Printer IP input

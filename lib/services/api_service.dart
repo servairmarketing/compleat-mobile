@@ -98,6 +98,64 @@ class ApiService {
   static const String serverErrorMessage =
       'Server error. Please try again or contact admin.';
 
+  /// Plain-text message for a FAILED server action, safe to print in a banner
+  /// (mobile twin of the web's `apiDetailText`, 2026-09-24). `detail` is a
+  /// string for ordinary errors, but a 422 validation response carries a LIST
+  /// of {loc, msg} objects — printing that raw shows "[{loc: …}]". Renders each
+  /// as a sentence ("width: Input should be a valid number."). Falls back to
+  /// `message`, then [fallback].
+  static String readableDetail(Map<String, dynamic>? res, String fallback) {
+    if (res == null) return fallback;
+    String sentence(String s) {
+      s = s.trim();
+      return s.isEmpty ? s : (RegExp(r'[.!?]$').hasMatch(s) ? s : '$s.');
+    }
+    String one(dynamic d) {
+      if (d == null) return '';
+      if (d is! Map) return d.toString();
+      final msg = d['msg'] ?? d['message'] ?? d['detail'];
+      if (msg == null || msg is Map || msg is List) return jsonEncode(d);
+      final loc = (d['loc'] is List ? List.from(d['loc']) : const [])
+          .asMap().entries
+          .where((e) => !(e.key == 0 && const ['body', 'query', 'path', 'header'].contains(e.value)))
+          .map((e) => e.value is num ? '(item ${(e.value as num) + 1})' : e.value.toString().replaceAll('_', ' '))
+          .join(' ');
+      return loc.isEmpty ? msg.toString() : '$loc: $msg';
+    }
+    final d = res['detail'];
+    String text;
+    if (d is List) {
+      text = d.map(one).where((s) => s.isNotEmpty).map(sentence).join(' ');
+    } else {
+      text = one(d);
+    }
+    if (text.isNotEmpty) return text;
+    final m = res['message'];
+    return (m is String && m.isNotEmpty) ? m : fallback;
+  }
+
+  /// DELETE with the same 401 auto-logout + defensive decode as post().
+  /// Used by the Receive screen's per-roll Undo (DELETE /rolls/{id}/receive).
+  static Future<Map<String, dynamic>> delete(String endpoint) async {
+    try {
+      final token = await getToken();
+      final response = await http.delete(
+        Uri.parse('$API_BASE$endpoint'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'detail': 'session_expired'};
+      }
+      return _decodeBody(response.body);
+    } catch (e) {
+      return {'success': false, 'detail': e.toString()};
+    }
+  }
+
   static Map<String, dynamic> _decodeBody(String body) {
     try {
       final decoded = jsonDecode(body);
