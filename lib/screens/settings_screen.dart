@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'change_password_screen.dart';
 import 'printer_settings_screen.dart';
+import 'scanner_settings_screen.dart';
 import '../brand.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -43,6 +44,14 @@ class SettingsScreen extends StatelessWidget {
                 description: 'Configure label printer',
                 color: const Color(0xFFe53935),
                 onTap: () => _navigate(context, const PrinterSettingsScreen()),
+              ),
+              _SettingsCard(
+                key: const Key('settingsCard_scanner'),
+                icon: Icons.qr_code_scanner,
+                label: 'Scanner Settings',
+                description: 'Scan-trigger key for no-read skip',
+                color: const Color(0xFF00897B),
+                onTap: () => _navigate(context, const ScannerSettingsScreen()),
               ),
               _SettingsCard(
                 key: const Key('settingsCard_changePassword'),

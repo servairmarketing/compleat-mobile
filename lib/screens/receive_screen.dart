@@ -192,6 +192,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     for (final c in [_rollIdController, _lengthController, _weightController, _notesController]) {
       c.addListener(_noRead.noteInput);
     }
+    ScannerStatusService.instance.loadTriggerKeyCode();   // configured trigger key (default 563)
     _scanSub = ScannerStatusService.instance.events.listen(_onScannerEvent);
     // Check for duplicate Roll ID when the field loses focus (typed entry).
     // Scan-completed events fire onSubmitted, which is wired separately.
@@ -476,10 +477,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _noRead.onStatus(e.status);
       if (appEnvironment == 'test') setState(() => _diagStatus = e.toString());
     } else if (e.isKey) {
-      // Diagnostics only — tells the TC22 walkthrough whether the scan trigger
-      // key is ever visible to the app (Joe's requirement 2). Skip is NOT
-      // driven by key events.
-      if (appEnvironment == 'test' && e.action == 0) setState(() => _diagKey = e.toString());
+      // Second feed (Joe's ruling 2026-09-25): the scan-trigger KEY. Down
+      // arms, up = beam-off; repeats while held are ignored. Same detector as
+      // the DataWedge path → one no-read per pull, never a double-fire.
+      if (ScannerStatusService.instance.isTriggerKey(e)) {
+        if (e.action == 0 && e.repeat == 0) _noRead.onTriggerDown();
+        if (e.action == 1) _noRead.onTriggerUp();
+      }
+      if (appEnvironment == 'test' && e.repeat == 0) setState(() => _diagKey = e.toString());
     } else if (e.type == 'listening') {
       if (appEnvironment == 'test') setState(() => _scannerListening = true);
     }
@@ -511,6 +516,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   Widget _buildScannerDiagnostics() {
     if (appEnvironment != 'test') return const SizedBox.shrink();
     final txt = 'Scanner diag · ${_scannerListening ? 'listening' : 'not listening'}'
+        ' · trigger key ${ScannerStatusService.instance.triggerKeyCode}'
         ' · no-reads ${_noRead.noReads}'
         '${_diagStatus.isEmpty ? '' : ' · last $_diagStatus'}'
         '${_diagKey.isEmpty ? '' : ' · last $_diagKey'}';

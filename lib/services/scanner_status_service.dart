@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Zebra DataWedge scanner-status bridge (Joe's ruling 2026-09-25, option 1 —
 /// "no-read = skip").
@@ -22,8 +23,13 @@ import 'package:flutter/services.dart';
 ///
 /// Screens opt in (Receive today) by listening to [events] and feeding a
 /// [NoReadDetector]. Also carries hardware KEY events forwarded by
-/// MainActivity for the TC22 walkthrough diagnostics (does the trigger key
-/// ever reach the app?).
+/// MainActivity. SECOND FEED (Joe's ruling 2026-09-25, after his non-Zebra
+/// scanner reported the trigger as hardware key 563): the scan-trigger KEY
+/// itself — down arms the detector, up starts the grace window — so a
+/// device without DataWedge gets the same no-read = skip. The key code is
+/// configurable ([ScannerStatusService.triggerKeyCode], Settings → Scanner,
+/// default [kDefaultTriggerKeyCode]) and always visible in the diagnostics.
+/// Both feeds drive ONE detector, which fires at most once per pull.
 class ScannerEvent {
   final String type;            // 'status' | 'key' | 'listening'
   final String status;          // for 'status': WAITING / SCANNING / IDLE / CONNECTED / DISCONNECTED / DISABLED
@@ -75,11 +81,45 @@ class ScannerEvent {
           : type;
 }
 
+/// Hardware key code of the scan trigger on Joe's non-Zebra test scanner
+/// (VERIFIED from the Receive diag line 2026-09-25: "last key 563(563) down").
+/// A default, not a rule — see [ScannerStatusService.triggerKeyCode].
+const int kDefaultTriggerKeyCode = 563;
+const String kTriggerKeyCodePref = 'scanner_trigger_keycode';
+
 class ScannerStatusService {
   ScannerStatusService._();
   static final ScannerStatusService instance = ScannerStatusService._();
 
   static const EventChannel _channel = EventChannel('com.compleat/scanner_status');
+
+  /// The key code treated as the scan trigger. Persisted in SharedPreferences;
+  /// [loadTriggerKeyCode] reads it once, [setTriggerKeyCode] saves it.
+  int triggerKeyCode = kDefaultTriggerKeyCode;
+  bool _prefLoaded = false;
+
+  Future<int> loadTriggerKeyCode() async {
+    if (_prefLoaded) return triggerKeyCode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      triggerKeyCode = prefs.getInt(kTriggerKeyCodePref) ?? kDefaultTriggerKeyCode;
+    } catch (_) {
+      triggerKeyCode = kDefaultTriggerKeyCode;
+    }
+    _prefLoaded = true;
+    return triggerKeyCode;
+  }
+
+  Future<void> setTriggerKeyCode(int code) async {
+    triggerKeyCode = code;
+    _prefLoaded = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(kTriggerKeyCodePref, code);
+    } catch (_) {}
+  }
+
+  bool isTriggerKey(ScannerEvent e) => e.isKey && e.keyCode == triggerKeyCode;
 
   final StreamController<ScannerEvent> _out = StreamController<ScannerEvent>.broadcast();
   StreamSubscription<dynamic>? _platformSub;
@@ -134,20 +174,26 @@ class ScannerStatusService {
 
 /// Pure-Dart no-read detector (unit-tested, no Flutter dependency).
 ///
-/// Feed it every SCANNER_STATUS change via [onStatus] and call [noteInput]
-/// whenever ANY text arrives in the entry fields (controller listeners).
-/// A no-read is: SCANNING (beam on) followed by WAITING or IDLE (beam off),
-/// with no input during the beam and none within [grace] after it — the
-/// grace window covers keystrokes DataWedge is still delivering after the
-/// beam went off on a REAL decode, so a successful scan never counts as a
-/// no-read. [onNoRead] fires at most once per pull.
+/// Two feeds, one detector:
+///   * DataWedge (Zebra): [onStatus] — SCANNING arms (beam on), WAITING/IDLE
+///     is beam-off.
+///   * Trigger key (any device that delivers the scan button as a hardware
+///     key): [onTriggerDown] arms, [onTriggerUp] is beam-off. Key repeats
+///     while held are ignored by the caller.
+/// Call [noteInput] whenever ANY text arrives in the entry fields.
+/// A no-read is: armed, then beam-off, with no input while armed and none
+/// within [grace] after beam-off — the grace window covers keystrokes still
+/// being delivered after the beam went off on a REAL decode, so a successful
+/// scan never counts. Beam-off only acts while armed and always disarms, so a
+/// device that reports BOTH feeds (a Zebra whose trigger key is also visible)
+/// still fires [onNoRead] at most once per pull.
 class NoReadDetector {
   NoReadDetector({required this.onNoRead, this.grace = const Duration(milliseconds: 400)});
 
   final void Function() onNoRead;
   final Duration grace;
 
-  bool _armed = false;       // beam is on (SCANNING seen)
+  bool _armed = false;       // beam is on (SCANNING seen / trigger key down)
   bool _inputSeen = false;   // any text arrived since the beam came on
   Timer? _timer;
 
@@ -156,32 +202,46 @@ class NoReadDetector {
 
   bool get isArmed => _armed;
 
-  void onStatus(String status) {
-    final s = status.toUpperCase();
-    if (s == 'SCANNING') {
-      _timer?.cancel();
+  void _arm() {
+    _timer?.cancel();
+    _timer = null;
+    _armed = true;
+    _inputSeen = false;
+  }
+
+  void _beamOff() {
+    if (!_armed) return;                    // not our pull (or already handled)
+    _armed = false;
+    if (_inputSeen) return;                 // real decode, data already here
+    _timer?.cancel();
+    _timer = Timer(grace, () {
       _timer = null;
-      _armed = true;
-      _inputSeen = false;
-      return;
-    }
-    if ((s == 'WAITING' || s == 'IDLE') && _armed) {
-      _armed = false;
-      if (_inputSeen) return;               // real decode, data already here
-      _timer?.cancel();
-      _timer = Timer(grace, () {
-        _timer = null;
-        if (_inputSeen) return;             // data arrived just after beam-off
-        noReads++;
-        onNoRead();
-      });
-      return;
-    }
-    // CONNECTED / DISCONNECTED / DISABLED / anything else: stand down.
+      if (_inputSeen) return;               // data arrived just after beam-off
+      noReads++;
+      onNoRead();
+    });
+  }
+
+  void _standDown() {
     _armed = false;
     _timer?.cancel();
     _timer = null;
   }
+
+  /// DataWedge SCANNER_STATUS feed.
+  void onStatus(String status) {
+    final s = status.toUpperCase();
+    if (s == 'SCANNING') { _arm(); return; }
+    if (s == 'WAITING' || s == 'IDLE') { _beamOff(); return; }
+    // CONNECTED / DISCONNECTED / DISABLED / anything else: stand down.
+    _standDown();
+  }
+
+  /// Trigger-key feed: the scan button went down (repeat events excluded).
+  void onTriggerDown() => _arm();
+
+  /// Trigger-key feed: the scan button was released.
+  void onTriggerUp() => _beamOff();
 
   void noteInput() {
     _inputSeen = true;

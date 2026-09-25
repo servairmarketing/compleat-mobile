@@ -108,7 +108,7 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74)
+### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74, trigger-key feed v1.0.75)
 A shipment is many rolls of one variety: fill the shared info once, scan roll after roll into
 an on-screen LIST, then press ONE Submit — the same pattern as Roll Production. Rolls are NOT
 saved as they are scanned; nothing reaches the server until Submit.
@@ -148,6 +148,16 @@ saved as they are scanned; nothing reaches the server until Submit.
      Rolls card shows listening state, no-read count, last status and last hardware KEY event
      (MainActivity forwards every KeyEvent — diagnostics only, the skip is never driven by key
      events); it tells the TC22 walkthrough whether the trigger key is visible to the app.
+     SECOND FEED — TRIGGER KEY (Joe's ruling 2026-09-25, after his non-Zebra scanner's diag line
+     read "last key 563(563) down", v1.0.75): when the scan button reaches the app as a hardware
+     key, key DOWN arms the same detector and key UP is beam-off (repeats while held ignored);
+     no characters within the grace window = the same no-read = skip. The key code is NOT
+     hard-coded: default 563, saved in SharedPreferences `scanner_trigger_keycode`, editable in
+     Settings → Scanner Settings (shows the LAST KEY SEEN live so any device's code can be read
+     off and saved; TEST diag line also shows the code in use). Both feeds drive ONE
+     `NoReadDetector`: beam-off acts only while armed and disarms, so a device reporting both
+     (a Zebra whose trigger is also a visible key) fires at most once per pull; a real scan
+     (characters arrive) never fires.
      Unit tests: `test/no_read_detector_test.dart`. Other screens can opt in the same way.
    - No "scan → Enter → Enter → Enter" hint text; no "Receive Roll" / "Clear roll" buttons.
 3. SUBMIT (one plain button at the bottom, no icon; disabled until the list has a roll):
