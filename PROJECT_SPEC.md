@@ -108,36 +108,52 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen — header + rapid roll entry (Joe's ruling 2026-09-24, v1.0.72)
-A delivery is many rolls of one variety: fill the shared info once, then scan roll after roll.
+### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73)
+A shipment is many rolls of one variety: fill the shared info once, scan roll after roll into
+an on-screen LIST, then press ONE Submit — the same pattern as Roll Production. Rolls are NOT
+saved as they are scanned; nothing reaches the server until Submit.
 
-1. DELIVERY HEADER (top; set once):
-   - Vendor — dropdown from /masters/vendors, required. FIXED for the delivery once the first roll saves.
-   - PO Number — free text, OPTIONAL. FIXED with Vendor once the first roll saves.
+1. SHIPMENT DETAILS (top section; set once):
+   - Vendor — dropdown from /masters/vendors, required. LOCKS once the first roll is in the list.
+   - PO Number — free text, OPTIONAL. Locks with Vendor.
    - Material Type / Basis Weight / Width (in) — dropdowns from the dedicated masters
-     endpoints, required. Set at the start, EDITABLE mid-delivery: rolls saved AFTER a
-     change carry the new values (each save posts the header values current at that moment).
-   - "New delivery" (app bar) clears everything and unlocks Vendor + PO (confirm when rolls
-     were already saved — they stay received; only the screen resets).
-2. ROLL ENTRY (repeats per roll): Roll ID → Length (ft) → Weight (lbs) → Notes.
-   - Roll ID — REQUIRED (scan or type; uppercase; inline duplicate check on Enter/blur; a
-     duplicate keeps focus on the field). The server still auto-generates an id for OLD
-     clients that send none.
-   - Length + Weight — OPTIONAL; Enter on an empty field skips it; a roll may save with
-     either or both blank (stored null; every display shows "—").
-   - Focus flow: Roll ID Enter → duplicate check → Length → Enter → Weight → Enter → SAVE
-     (POST /rolls/receive with the header) → haptic pulse + green flash on the roll card +
-     the roll appears in the running list with the delivery count → cursor back to Roll ID.
-   - Running list ("This delivery"): this delivery's rolls newest first with Material /
-     Basis / Width / L / W / time and an Undo per row. Undo = DELETE /rolls/{id}/receive;
-     the SERVER enforces the guardrails (own receive, in stock, no children, within 4 h)
-     and answers 4xx with a readable reason.
-   - No sound dependency (ruling): confirmation = haptic + flash only.
+     endpoints, required. EDITABLE mid-shipment: rolls ADDED after a change carry the new
+     values (each roll in the list stores its own copy).
+   - "New shipment" (app bar) discards the unsubmitted list (confirm when rolls are in it)
+     and unlocks Vendor + PO.
+2. ROLLS section:
+   - Counter tile ABOVE the Roll ID field: "N rolls in this shipment — not yet submitted".
+     Tapping it expands INLINE (no popup) to the list of roll IDs with a visible Collapse
+     control. Tapping a roll expands its details — Length, Weight, Notes and the header
+     values it carries — all EDITABLE, plus "Remove from shipment". Purely local.
+   - Entry fields (no per-roll button): Roll ID → Length (ft) → Weight (lbs) → Notes.
+     Roll ID REQUIRED (scan or type; uppercase; duplicate check against the list first, then
+     the server, on Enter/blur; a duplicate keeps focus on the field).
+     Focus flow: Roll ID Enter → duplicate check → Length → Enter → Weight → Enter → the roll
+     is ADDED TO THE LIST (haptic pulse + green flash + counter ticks) → cursor back to
+     Roll ID. Enter on an EMPTY field skips it (scan → Enter → Enter adds a roll with no
+     length/weight). Notes: tap in, type, Enter completes the roll.
+   - No "scan → Enter → Enter → Enter" hint text; no "Receive Roll" / "Clear roll" buttons.
+3. SUBMIT (one plain button at the bottom, no icon; disabled until the list has a roll):
+   POST /rolls/receive/batch {vendor_id, po_number, submit_id, rolls:[{roll_id, material_type,
+   basis_weight, width, length, weight, notes}]} — ALL-OR-NOTHING on the server (validate every
+   roll first; one Firestore WriteBatch; 409/400 with per-roll `results` when anything is
+   wrong, nothing saved). Success → banner "✔ N rolls received", the screen clears, and a
+   "Submitted — N rolls received" result lists the rolls with a per-roll Undo
+   (DELETE /rolls/{id}/receive; the SERVER enforces own receive / in stock / no children /
+   within 4 h). Failure → banner "Nothing saved: …", the refused rolls are marked in the list
+   (which opens), the list is kept for correction. `submit_id` makes a retry after a lost
+   response idempotent (server answers `replayed: true`).
+4. DRAFT PERSISTENCE: the whole unsubmitted shipment (header, lock, list, half-typed roll,
+   submit_id) is written to SharedPreferences (`receive_shipment_draft_v1`, debounced) on
+   every change and restored when the screen or the app comes back, with an amber
+   "Unsubmitted shipment restored — N rolls" banner. Cleared ONLY by Submit or New shipment.
+   This screen no longer uses the in-memory FormStateCache.
 
 Rules:
 - All dropdowns fetch fresh from API on every screen load; no hardcoded lists anywhere
-- The in-memory FormStateCache snapshot carries the whole delivery (header, lock, list,
-  half-typed roll) across nav-away; "New delivery" clears it
+- The old per-roll POST /rolls/receive stays on the server for older installed apps; this
+  screen never calls it
 - Errors render via ApiService.readableDetail (a 422 list prints as sentences, never raw)
 
 ### Printer Settings Screen

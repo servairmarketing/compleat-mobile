@@ -8,6 +8,12 @@
 /// It is intentionally NOT persisted to Firestore, SharedPreferences or
 /// disk — values are lost on app close, which is the desired behaviour.
 ///
+/// EXCEPTION (Joe's ruling 2026-09-25, Receive rev 2): the Receive screen no
+/// longer uses this cache — its unsubmitted shipment (header + roll list +
+/// half-typed roll) must survive an app close/restart, so it persists to
+/// SharedPreferences itself (receive_screen.dart, key
+/// `receive_shipment_draft_v1`). Every other screen keeps the in-memory rule.
+///
 /// Usage pattern per screen:
 ///  - `initState`: read the snapshot (if any) and repopulate controllers /
 ///    selection state.

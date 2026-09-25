@@ -1,69 +1,98 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dropdown_search/dropdown_search.dart';
-import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/parent_validation.dart';
 import '../services/local_db.dart';
 import '../services/field_focus.dart';
-import '../services/form_state_cache.dart';
 import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
 import '../brand.dart';
 
-/// Receive Parent Roll — header + rapid roll entry (Joe's ruling 2026-09-24).
+/// Receive Parent Roll — shipment batch flow (Joe's rulings 2026-09-25, rev 2).
 ///
-/// A paper delivery is many rolls of one variety, so the screen is two parts:
+/// Rolls are NOT saved as they are scanned. They collect in an on-screen list
+/// and ONE Submit at the bottom saves the whole shipment through
+/// POST /rolls/receive/batch (all-or-nothing on the server) — the same pattern
+/// as Roll Production. Screen parts:
 ///
-///   1. DELIVERY HEADER (top card), filled once:
-///      - Vendor + PO Number: FIXED for the delivery once the first roll saves
-///        (dropdown/field lock; "New delivery" clears + unlocks).
-///      - Material Type / Basis Weight / Width: set at the start, EDITABLE
-///        mid-delivery — rolls saved AFTER a change carry the new values
-///        (every save posts the header values current at that moment).
-///   2. ROLL ENTRY (second card), repeated per roll:
-///      Roll ID (required) → Length (ft, optional) → Weight (lbs, optional).
-///      Scan/Enter on Roll ID → duplicate check → cursor to Length; Enter on
-///      Length → Weight (empty allowed); Enter on Weight → the roll SAVES at
-///      once with the header, haptic pulse + green flash, it appears in the
-///      running list below with the delivery count, cursor back to Roll ID.
-///      Per-roll Undo (own receive, in stock, no children, within 4 h — the
-///      server enforces it via DELETE /rolls/{id}/receive).
+///   1. SHIPMENT DETAILS (top), filled once:
+///      - Vendor + PO Number: lock once the first roll is in the list
+///        ("New shipment" resets).
+///      - Material Type / Basis Weight / Width: EDITABLE mid-shipment — rolls
+///        ADDED after a change carry the new values (each roll keeps its own copy).
+///   2. ROLLS: a counter ("N rolls") ABOVE the Roll ID field that expands INLINE
+///      to the list of roll IDs; a roll expands to its details — editable and
+///      removable, since nothing is saved yet. Then the entry fields:
+///      Roll ID (scan → Enter → Length) → Enter → Weight → Enter → the roll is
+///      ADDED to the list (locally) and the cursor returns to Roll ID. Enter on
+///      an empty field skips it. Notes: tap in, type, Enter completes the roll.
+///   3. ONE plain Submit button at the bottom → result "N received" → cleared.
+///      The result keeps a per-roll Undo (DELETE /rolls/{id}/receive) for
+///      post-submit corrections.
 ///
-/// PO Number is OPTIONAL (ruling 2026-09-24, matches PROJECT_SPEC); Length +
-/// Weight are OPTIONAL; Roll ID is REQUIRED on this client (the server still
-/// auto-generates for old clients). kBrandColor only.
+/// DRAFT PERSISTENCE (ruling #6): the whole state (header + list + half-typed
+/// roll) is written to SharedPreferences on every change and restored when the
+/// screen — or the app — comes back, clearly marked as unsubmitted. Cleared only
+/// by Submit or New shipment. This supersedes the in-memory-only FormStateCache
+/// for THIS screen only (Joe, 2026-09-25); other screens are unchanged.
+///
+/// PO Number OPTIONAL; Length + Weight OPTIONAL; Roll ID REQUIRED. kBrandColor only.
 class ReceiveScreen extends StatefulWidget {
   const ReceiveScreen({super.key});
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
-class _SessionRoll {
-  final String rollId;
-  final String? materialType;
-  final String? basisWeight;
-  final String? width;
-  final double? length;
-  final double? weight;
-  final DateTime savedAt;
-  bool undone;
-  _SessionRoll({required this.rollId, this.materialType, this.basisWeight, this.width,
-      this.length, this.weight, required this.savedAt, this.undone = false});
+/// One roll in the shipment list (unsubmitted) or in the last result.
+class _ShipRoll {
+  final int key;
+  String rollId;
+  String? materialType;
+  String? basisWeight;
+  String? width;
+  double? length;
+  double? weight;
+  String notes;
+  final DateTime addedAt;
+  String? serverError;   // set from a refused submit's per-roll results (not persisted)
+  bool undone;           // result list only
+  _ShipRoll({required this.key, required this.rollId, this.materialType, this.basisWeight, this.width,
+      this.length, this.weight, this.notes = '', DateTime? addedAt, this.serverError, this.undone = false})
+      : addedAt = addedAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
-        'rollId': rollId, 'materialType': materialType, 'basisWeight': basisWeight,
-        'width': width, 'length': length, 'weight': weight,
-        'savedAt': savedAt.toIso8601String(), 'undone': undone,
+        'key': key, 'rollId': rollId, 'materialType': materialType, 'basisWeight': basisWeight,
+        'width': width, 'length': length, 'weight': weight, 'notes': notes,
+        'addedAt': addedAt.toIso8601String(),
       };
-  static _SessionRoll fromJson(Map m) => _SessionRoll(
-        rollId: m['rollId'] ?? '', materialType: m['materialType'], basisWeight: m['basisWeight'],
-        width: m['width'], length: (m['length'] as num?)?.toDouble(), weight: (m['weight'] as num?)?.toDouble(),
-        savedAt: DateTime.tryParse(m['savedAt'] ?? '') ?? DateTime.now(), undone: m['undone'] == true);
+  static _ShipRoll fromJson(Map m) => _ShipRoll(
+        key: (m['key'] as num?)?.toInt() ?? 0, rollId: m['rollId'] ?? '', materialType: m['materialType'],
+        basisWeight: m['basisWeight'], width: m['width']?.toString(),
+        length: (m['length'] as num?)?.toDouble(), weight: (m['weight'] as num?)?.toDouble(),
+        notes: m['notes'] ?? '', addedAt: DateTime.tryParse(m['addedAt'] ?? '') ?? DateTime.now());
+  _ShipRoll copy() => _ShipRoll(key: key, rollId: rollId, materialType: materialType, basisWeight: basisWeight,
+      width: width, length: length, weight: weight, notes: notes, addedAt: addedAt);
+
+  Map<String, dynamic> toPayload() => {
+        'roll_id': rollId,
+        'material_type': materialType,
+        'basis_weight': basisWeight,
+        'width': double.tryParse(width ?? ''),
+        'length': length,
+        'weight': weight,
+        'notes': notes,
+      };
 }
 
 class _ReceiveScreenState extends State<ReceiveScreen> {
+  static const _draftKey = 'receive_shipment_draft_v1';
+
   final _rollIdController = TextEditingController();
   final _poController = TextEditingController();
   final _lengthController = TextEditingController();
@@ -79,7 +108,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   final _lengthFocusNode = FocusNode();
   final _weightFocusNode = FocusNode();
   final _notesFocusNode = FocusNode();
-  final _submitFocusNode = FocusNode();
 
   final _vendorDropdownKey = GlobalKey<DropdownSearchState<String>>();
   final _materialTypeDropdownKey = GlobalKey<DropdownSearchState<String>>();
@@ -104,55 +132,48 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String? _message;
   bool _messageSuccess = false;
 
-  // Delivery session (2026-09-24): Vendor + PO lock after the first save;
-  // the running list is this delivery's rolls, newest first.
+  // Shipment (rev 2): Vendor + PO lock once the first roll is in the list; the
+  // list is local until Submit. _submitId = idempotent retry key for the batch.
   bool _headerLocked = false;
-  final List<_SessionRoll> _sessionRolls = [];
-  bool _flash = false;           // green flash on the roll card after a save
-  String? _undoingRollId;        // row whose Undo is in flight
+  final List<_ShipRoll> _rolls = [];
+  String _submitId = _newSubmitId();
+  int _nextKey = 1;
+  bool _listOpen = false;
+  int? _openRollKey;
+  bool _flash = false;                 // green flash on the roll card after an add
+  String? _restoredNote;               // "Unsubmitted shipment restored — N rolls"
+  Timer? _persistTimer;
+  bool _draftLoaded = false;
+
+  // Last submitted shipment (result + per-roll Undo).
+  List<_ShipRoll>? _lastSubmitted;
+  DateTime? _lastSubmittedAt;
+  String? _lastVendor;
+  String? _lastPo;
+  String? _undoingRollId;
 
   // Bug #6 — inline duplicate Roll ID check.
   String? _rollIdError;          // shown under the Roll ID field
   String _lastCheckedRollId = '';// avoid hitting the API for unchanged value
-  bool _rollIdChecking = false;
 
-  // Bug #14 — in-memory form-state cache key for this screen. The whole
-  // delivery (header, lock, running list, half-typed roll) survives nav-away.
-  static const _cacheKey = 'receive';
+  static String _newSubmitId() {
+    final r = Random();
+    return '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-'
+        '${r.nextInt(1 << 30).toRadixString(36)}${r.nextInt(1 << 30).toRadixString(36)}';
+  }
 
-  int get _liveCount => _sessionRolls.where((r) => !r.undone).length;
+  int get _count => _rolls.length;
+  String get _countLabel => '$_count ${_count == 1 ? 'roll' : 'rolls'}';
 
   @override
   void initState() {
     super.initState();
     _loadMasters();
-    // Bug #14 — restore any in-progress delivery preserved on nav-away.
-    final snap = FormStateCache.read(_cacheKey);
-    if (snap != null) {
-      _rollIdController.text = snap['rollId'] ?? '';
-      _poController.text = snap['po'] ?? '';
-      _lengthController.text = snap['length'] ?? '';
-      _weightController.text = snap['weight'] ?? '';
-      _notesController.text = snap['notes'] ?? '';
-      _selectedVendor = snap['vendor'];
-      _selectedMaterialType = snap['materialType'];
-      _selectedBasisWeight = snap['basisWeight'];
-      _selectedWidth = snap['width'];
-      _headerLocked = snap['headerLocked'] == true;
-      final rolls = snap['sessionRolls'];
-      if (rolls is List) {
-        _sessionRolls.addAll(rolls.whereType<Map>().map(_SessionRoll.fromJson));
-      }
+    _restoreDraft();
+    // Keep the draft current as the operator types.
+    for (final c in [_rollIdController, _poController, _lengthController, _weightController, _notesController]) {
+      c.addListener(_persistDraft);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      // Header first when the delivery is not set up yet; otherwise straight to the scan field.
-      if (_selectedVendor == null && !_headerLocked) {
-        _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
-      } else {
-        _rollIdFocusNode.requestFocus();
-      }
-    });
     // Check for duplicate Roll ID when the field loses focus (typed entry).
     // Scan-completed events fire onSubmitted, which is wired separately.
     _rollIdFocusNode.addListener(() {
@@ -164,21 +185,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   @override
   void dispose() {
-    // Bug #14 — snapshot the current delivery before disposing controllers so
-    // returning to the screen restores it. In-memory only — never persisted.
-    FormStateCache.write(_cacheKey, {
-      'rollId': _rollIdController.text,
-      'po': _poController.text,
-      'length': _lengthController.text,
-      'weight': _weightController.text,
-      'notes': _notesController.text,
-      'vendor': _selectedVendor,
-      'materialType': _selectedMaterialType,
-      'basisWeight': _selectedBasisWeight,
-      'width': _selectedWidth,
-      'headerLocked': _headerLocked,
-      'sessionRolls': _sessionRolls.map((r) => r.toJson()).toList(),
-    });
+    // Ruling #6 — nav-away keeps the whole unsubmitted shipment. Snapshot the
+    // controllers BEFORE disposing them, then write (fire-and-forget).
+    _persistTimer?.cancel();
+    _persistDraftNow();
     _rollIdController.dispose();
     _poController.dispose();
     _lengthController.dispose();
@@ -193,9 +203,112 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _lengthFocusNode.dispose();
     _weightFocusNode.dispose();
     _notesFocusNode.dispose();
-    _submitFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ── Draft persistence (SharedPreferences; Receive only) ────────────────────
+  Map<String, dynamic> _draftSnapshot() => {
+        'v': 1,
+        'submitId': _submitId,
+        'nextKey': _nextKey,
+        'headerLocked': _headerLocked,
+        'vendor': _selectedVendor,
+        'po': _poController.text,
+        'materialType': _selectedMaterialType,
+        'basisWeight': _selectedBasisWeight,
+        'width': _selectedWidth,
+        'rollId': _rollIdController.text,
+        'length': _lengthController.text,
+        'weight': _weightController.text,
+        'notes': _notesController.text,
+        'rolls': _rolls.map((r) => r.toJson()).toList(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+
+  bool get _draftIsEmpty =>
+      _rolls.isEmpty && _selectedVendor == null && _selectedMaterialType == null &&
+      _selectedBasisWeight == null && _selectedWidth == null && _poController.text.isEmpty &&
+      _rollIdController.text.isEmpty && _lengthController.text.isEmpty &&
+      _weightController.text.isEmpty && _notesController.text.isEmpty;
+
+  /// Debounced write — called on every change.
+  void _persistDraft() {
+    if (!_draftLoaded) return;             // never overwrite a draft we have not read yet
+    _persistTimer?.cancel();
+    _persistTimer = Timer(const Duration(milliseconds: 300), _persistDraftNow);
+  }
+
+  void _persistDraftNow() {
+    if (!_draftLoaded) return;
+    final empty = _draftIsEmpty;
+    final payload = empty ? null : jsonEncode(_draftSnapshot());
+    SharedPreferences.getInstance().then((p) async {
+      if (payload == null) {
+        await p.remove(_draftKey);
+      } else {
+        await p.setString(_draftKey, payload);
+      }
+    }).catchError((_) {});
+  }
+
+  Future<void> _clearDraftStorage() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.remove(_draftKey);
+    } catch (_) {}
+  }
+
+  Future<void> _restoreDraft() async {
+    Map<String, dynamic>? snap;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_draftKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) snap = decoded;
+      }
+    } catch (_) {
+      snap = null;
+    }
+    if (!mounted) return;
+    if (snap != null) {
+      final s = snap;
+      final rolls = s['rolls'];
+      setState(() {
+        final sid = s['submitId'];
+        if (sid is String && sid.isNotEmpty) _submitId = sid;
+        _nextKey = (s['nextKey'] as num?)?.toInt() ?? 1;
+        _selectedVendor = s['vendor'];
+        _selectedMaterialType = s['materialType'];
+        _selectedBasisWeight = s['basisWeight'];
+        _selectedWidth = s['width']?.toString();
+        _poController.text = s['po'] ?? '';
+        _rollIdController.text = s['rollId'] ?? '';
+        _lengthController.text = s['length'] ?? '';
+        _weightController.text = s['weight'] ?? '';
+        _notesController.text = s['notes'] ?? '';
+        _rolls.clear();
+        if (rolls is List) _rolls.addAll(rolls.whereType<Map>().map(_ShipRoll.fromJson));
+        for (final r in _rolls) {
+          if (r.key >= _nextKey) _nextKey = r.key + 1;
+        }
+        _headerLocked = _rolls.isNotEmpty || s['headerLocked'] == true;
+        final n = _rolls.length;
+        _restoredNote = 'Unsubmitted shipment restored — $n ${n == 1 ? 'roll' : 'rolls'}'
+            '${n == 0 ? ' (header only)' : ' in the list'}. Nothing is saved until you press Submit.';
+      });
+    }
+    _draftLoaded = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Header first when the shipment is not set up yet; otherwise straight to the scan field.
+      if (_selectedVendor == null && !_headerLocked) {
+        _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
+      } else {
+        _rollIdFocusNode.requestFocus();
+      }
+    });
   }
 
   // Bug #11 — advance with a short delay (so the just-completed field stays
@@ -276,22 +389,27 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  /// Resolves true when the Roll ID is present and not a duplicate.
+  /// Resolves true when the Roll ID is present, not already in this shipment
+  /// and not on the server.
   Future<bool> _checkRollIdDuplicate(String rollId) async {
     rollId = ParentValidation.normalizeRollId(rollId);
     if (rollId.isEmpty) {
-      // Roll ID is REQUIRED on this client; an empty field is reported at
-      // save time (validation dialog), not as an inline error while scanning.
+      // Roll ID is REQUIRED; an empty field is reported at add time
+      // (validation dialog), not as an inline error while scanning.
       if (_rollIdError != null) setState(() => _rollIdError = null);
       _lastCheckedRollId = '';
       return false;
     }
+    if (_rolls.any((r) => r.rollId == rollId)) {
+      setState(() => _rollIdError = 'This roll is already in the shipment list.');
+      _lastCheckedRollId = rollId;
+      _rollIdFocusNode.requestFocus();
+      return false;
+    }
     if (rollId == _lastCheckedRollId) return _rollIdError == null;
     _lastCheckedRollId = rollId;
-    setState(() => _rollIdChecking = true);
     final res = await ApiService.get('/rolls/$rollId');
     if (!mounted) return false;
-    setState(() => _rollIdChecking = false);
     // /rolls/{id} returns {"roll": {...}} on hit, {"detail": "...not found."} on
     // 404. Anything else (network error / session_expired) we silently ignore;
     // the server-side check at submit time is the final guard.
@@ -330,9 +448,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     return issues;
   }
 
-  /// Save ONE roll with the header values current now.
-  Future<void> _submit() async {
-    if (_submitting) return;
+  // ── Add one roll to the LIST (local; nothing is sent to the server) ────────
+  Future<void> _addRoll() async {
     final issues = _headerIssues();
     final rollId = ParentValidation.normalizeRollId(_rollIdController.text);
     final lengthText = _lengthController.text.trim();
@@ -344,57 +461,43 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (weightText.isNotEmpty && double.tryParse(weightText) == null) {
       issues.add('Weight must be a number');
     }
-    if (_rollIdError != null) {
-      issues.add('Roll ID already exists — please correct before submitting');
+    if (rollId.isNotEmpty && _rolls.any((r) => r.rollId == rollId)) {
+      issues.add('This roll is already in the shipment list');
+    } else if (_rollIdError != null) {
+      issues.add('Roll ID already exists — please correct before adding it');
     }
     if (issues.isNotEmpty) {
-      await showValidationDialog(context, issues);
+      await showValidationDialog(context, issues, title: 'Cannot add roll');
       return;
     }
-    setState(() { _submitting = true; _message = null; });
-    final po = _poController.text.trim();
-    final payload = {
-      'roll_id': rollId,
-      'vendor_id': _selectedVendor,
-      'po_number': po.isEmpty ? null : po,                       // optional (ruling 2026-09-24)
-      'material_type': _selectedMaterialType,
-      'basis_weight': _selectedBasisWeight,
-      'width': double.tryParse(_selectedWidth ?? ''),
-      'length': lengthText.isEmpty ? null : double.tryParse(lengthText),   // optional
-      'weight': weightText.isEmpty ? null : double.tryParse(weightText),   // optional
-      'notes': _notesController.text.trim(),
-    };
-    final res = await ApiService.post('/rolls/receive', payload);
-    if (!mounted) return;
-    if (res['success'] == true) {
-      final id = (res['roll_id'] ?? rollId).toString();
-      setState(() {
-        _headerLocked = true;               // Vendor + PO fixed from the first save
-        _sessionRolls.insert(0, _SessionRoll(
-          rollId: id, materialType: _selectedMaterialType, basisWeight: _selectedBasisWeight,
-          width: _selectedWidth, length: payload['length'] as double?, weight: payload['weight'] as double?,
-          savedAt: DateTime.now()));
-        _message = '✔ $id saved — $_liveCount this delivery';
-        _messageSuccess = true;
-        _submitting = false;
-      });
-      _confirmSaved();
-      _clearRollFields();
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted && _messageSuccess) setState(() => _message = null);
-      });
-    } else {
-      setState(() {
-        _message = ApiService.readableDetail(res, 'Error submitting.');
-        _messageSuccess = false;
-        _submitting = false;
-      });
-    }
+    final roll = _ShipRoll(
+      key: _nextKey++,
+      rollId: rollId,
+      materialType: _selectedMaterialType,
+      basisWeight: _selectedBasisWeight,
+      width: _selectedWidth,
+      length: lengthText.isEmpty ? null : double.tryParse(lengthText),
+      weight: weightText.isEmpty ? null : double.tryParse(weightText),
+      notes: _notesController.text.trim(),
+    );
+    setState(() {
+      _rolls.add(roll);
+      _headerLocked = true;                // Vendor + PO fixed from the first roll
+      _lastSubmitted = null;               // a new shipment is under way
+      _message = '✔ $rollId added — $_countLabel in this shipment';
+      _messageSuccess = true;
+    });
+    _confirmAdded();
+    _clearRollFields();
+    _persistDraft();
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && _messageSuccess) setState(() => _message = null);
+    });
   }
 
   // Confirmation: haptic pulse + green flash on the roll card (no sound
   // dependency — Joe's ruling 2026-09-24).
-  void _confirmSaved() {
+  void _confirmAdded() {
     HapticFeedback.mediumImpact();
     setState(() => _flash = true);
     Future.delayed(const Duration(milliseconds: 600), () {
@@ -415,25 +518,109 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     });
   }
 
-  /// Finish this delivery: clear everything, unlock Vendor + PO, empty the list.
-  Future<void> _newDelivery() async {
-    if (_liveCount > 0) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Start a new delivery?'),
-          content: Text('The $_liveCount roll(s) already saved stay received — only this screen resets.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: kBrandColor, foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx, true), child: const Text('New delivery')),
-          ],
-        ),
-      );
-      if (ok != true) return;
+  // ── Local edits + removal (nothing is saved yet) ───────────────────────────
+  void _editRoll(_ShipRoll r, void Function() change) {
+    setState(() {
+      change();
+      r.serverError = null;
+    });
+    _persistDraft();
+  }
+
+  Future<void> _removeRoll(_ShipRoll r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Remove ${r.rollId}?'),
+        content: const Text('It has not been submitted, so nothing else changes.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: kBrandColor, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _rolls.remove(r);
+      if (_openRollKey == r.key) _openRollKey = null;
+      if (_rolls.isEmpty) { _headerLocked = false; _listOpen = false; }
+      _message = '${r.rollId} removed — $_countLabel in this shipment';
+      _messageSuccess = true;
+    });
+    _persistDraft();
+    _rollIdFocusNode.requestFocus();
+  }
+
+  // ── ONE Submit → POST /rolls/receive/batch (all-or-nothing) ────────────────
+  Future<void> _submitShipment() async {
+    if (_submitting) return;
+    final issues = <String>[];
+    if (_selectedVendor == null) issues.add('Vendor is required');
+    if (_rolls.isEmpty) issues.add('Scan at least one roll before submitting');
+    for (var i = 0; i < _rolls.length; i++) {
+      final r = _rolls[i];
+      if (r.materialType == null || r.basisWeight == null || r.width == null) {
+        issues.add('Roll ${i + 1} (${r.rollId}) is missing material, basis weight or width — open the list and complete it');
+      }
     }
-    FormStateCache.clear(_cacheKey);
+    if (issues.isNotEmpty) {
+      await showValidationDialog(context, issues);
+      return;
+    }
+    setState(() { _submitting = true; _message = null; });
+    final po = _poController.text.trim();
+    final payload = {
+      'vendor_id': _selectedVendor,
+      'po_number': po.isEmpty ? null : po,
+      'submit_id': _submitId,
+      'rolls': _rolls.map((r) => r.toPayload()).toList(),
+    };
+    final res = await ApiService.post('/rolls/receive/batch', payload);
+    if (!mounted) return;
+    if (res['success'] == true) {
+      final n = (res['received'] as num?)?.toInt() ?? _rolls.length;
+      final replayed = res['replayed'] == true;
+      final submitted = _rolls.map((r) => r.copy()).toList();
+      final vendor = _selectedVendor;
+      _resetShipment();
+      setState(() {
+        _lastSubmitted = submitted;
+        _lastSubmittedAt = DateTime.now();
+        _lastVendor = vendor;
+        _lastPo = po.isEmpty ? null : po;
+        _message = '✔ $n ${n == 1 ? 'roll' : 'rolls'} received${replayed ? ' (already saved by an earlier submit)' : ''}';
+        _messageSuccess = true;
+        _submitting = false;
+      });
+      HapticFeedback.mediumImpact();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusAndOpenDropdown(_vendorFocusNode, _vendorDropdownKey);
+      });
+    } else {
+      // Nothing was saved. Mark the exact rolls the server refused and open the list.
+      final detail = res['detail'];
+      final byId = <String, String>{};
+      if (detail is Map && detail['results'] is List) {
+        for (final x in (detail['results'] as List).whereType<Map>()) {
+          if (x['ok'] != true && x['error'] != null) byId[x['roll_id'].toString()] = x['error'].toString();
+        }
+      }
+      setState(() {
+        for (final r in _rolls) {
+          r.serverError = byId[r.rollId];
+        }
+        if (byId.isNotEmpty) _listOpen = true;
+        _message = 'Nothing saved: ${ApiService.readableDetail(res, 'Error submitting.')}';
+        _messageSuccess = false;
+        _submitting = false;
+      });
+    }
+  }
+
+  /// After a successful Submit (or "New shipment"): the screen is empty again.
+  void _resetShipment() {
     _rollIdController.clear();
     _poController.clear();
     _lengthController.clear();
@@ -445,11 +632,40 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _selectedBasisWeight = null;
       _selectedWidth = null;
       _headerLocked = false;
-      _sessionRolls.clear();
+      _rolls.clear();
+      _submitId = _newSubmitId();
+      _nextKey = 1;
+      _listOpen = false;
+      _openRollKey = null;
       _rollIdError = null;
-      _message = null;
+      _restoredNote = null;
     });
     _lastCheckedRollId = '';
+    _persistTimer?.cancel();
+    _clearDraftStorage();
+  }
+
+  /// "New shipment": discard the unsubmitted list (confirm), unlock Vendor + PO.
+  Future<void> _newShipment() async {
+    if (_count > 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Start a new shipment?'),
+          content: Text('The $_countLabel in the list have NOT been submitted and will be discarded.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: kBrandColor, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true), child: const Text('Discard & start new')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    if (!mounted) return;
+    _resetShipment();
+    setState(() { _lastSubmitted = null; _message = null; });
     FocusScope.of(context).unfocus();
     if (_scrollController.hasClients) {
       _scrollController.animateTo(0,
@@ -460,9 +676,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     });
   }
 
-  /// Per-roll undo — the server enforces: own receive, in stock, no children,
-  /// within 4 h; anything else comes back 4xx with a readable reason.
-  Future<void> _undo(_SessionRoll r) async {
+  /// Per-roll undo on the LAST SUBMITTED shipment — the server enforces: own
+  /// receive, in stock, no children, within 4 h; anything else comes back 4xx
+  /// with a readable reason.
+  Future<void> _undo(_ShipRoll r) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -484,23 +701,24 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _undoingRollId = null;
       if (res['success'] == true) {
         r.undone = true;
-        _message = '↩ ${r.rollId} undone — $_liveCount this delivery';
+        final live = _lastSubmitted?.where((x) => !x.undone).length ?? 0;
+        _message = '↩ ${r.rollId} undone — $live still received';
         _messageSuccess = true;
       } else {
         _message = 'Could not undo: ${ApiService.readableDetail(res, 'unknown error')}';
         _messageSuccess = false;
       }
     });
-    _rollIdFocusNode.requestFocus();
   }
 
   String _headerSummary() {
     if (_selectedVendor == null) return '';
     final po = _poController.text.trim();
-    return '${_selectedVendor}${po.isEmpty ? '' : ' · PO $po'} · now '
-        '${_selectedMaterialType ?? '?'} / ${_selectedBasisWeight ?? '?'} / '
-        '${_selectedWidth == null ? '?' : '$_selectedWidth"'}';
+    return '${_selectedVendor}${po.isEmpty ? '' : ' · PO $po'}';
   }
+
+  static String _fmt(double? v) =>
+      v == null ? '—' : (v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString());
 
   @override
   Widget build(BuildContext context) {
@@ -513,11 +731,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         title: const Text('Receive Parent Roll', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         actions: [
           TextButton.icon(
-            key: const Key('newDeliveryButton'),
-            onPressed: _newDelivery,
+            key: const Key('newShipmentButton'),
+            onPressed: _newShipment,
             style: TextButton.styleFrom(foregroundColor: Colors.white),
             icon: const Icon(Icons.add, size: 20),
-            label: const Text('New delivery'),
+            label: const Text('New shipment'),
           ),
         ],
       ),
@@ -548,14 +766,30 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
 
+                // Ruling #6 — the restored, still-unsubmitted shipment is clearly marked.
+                if (_restoredNote != null)
+                  Container(
+                    key: const Key('draftRestoredBanner'),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF8E1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF4C542)),
+                    ),
+                    child: Text('📝 $_restoredNote', style: const TextStyle(
+                      color: Color(0xFF5C4500), fontSize: 14, fontWeight: FontWeight.bold)),
+                  ),
+
                 if (_mastersLoadError != null)
                   LoadErrorCard(
                     message: _mastersLoadError!,
                     onRetry: _loadMasters,
                   ),
 
-                // ── 1. DELIVERY HEADER ─────────────────────────────────────
-                _sectionTitle('Delivery', trailing: _headerLocked
+                // ── 1. SHIPMENT DETAILS ───────────────────────────────────
+                _sectionTitle('Shipment Details', trailing: _headerLocked
                     ? const _Chip(text: '🔒 Vendor & PO locked', color: Color(0xFFFFF8E1), fg: Color(0xFF5C4500))
                     : null),
                 const SizedBox(height: 10),
@@ -589,7 +823,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedBasisWeight = null;
                       }
                     });
-                    // Mid-delivery edit: go back to scanning; initial setup: continue the header.
+                    _persistDraft();
+                    // Mid-shipment edit: go back to scanning; initial setup: continue the header.
                     if (_headerLocked) { _rollIdFocusNode.requestFocus(); return; }
                     _focusAndOpenDropdown(_basisWeightFocusNode, _basisWeightDropdownKey);
                   },
@@ -613,6 +848,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         _selectedMaterialType = null;
                       }
                     });
+                    _persistDraft();
                     if (_headerLocked) { _rollIdFocusNode.requestFocus(); return; }
                     _focusAndOpenDropdown(_widthFocusNode, _widthDropdownKey);
                   },
@@ -628,20 +864,23 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   dropdownKey: _widthDropdownKey,
                   onChanged: (v) {
                     setState(() => _selectedWidth = v);
+                    _persistDraft();
                     FieldFocus.advance(context, target: _rollIdFocusNode);
                   },
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  _headerLocked
-                      ? 'Material, basis weight and width can still be changed — rolls saved after the change carry the new values.'
-                      : 'Fill the delivery once, then scan roll after roll below.',
-                  style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const Text(
+                  'Material, basis weight and width can be changed mid-shipment — rolls added after the change carry the new values.',
+                  style: TextStyle(fontSize: 13, color: Colors.black54)),
                 const SizedBox(height: 22),
 
-                // ── 2. ROLL ENTRY ──────────────────────────────────────────
-                _sectionTitle('Roll entry', subtitle: 'scan → Enter → Enter → Enter'),
+                // ── 2. ROLLS: counter + inline list ABOVE the Roll ID field ──
+                _sectionTitle('Rolls'),
                 const SizedBox(height: 10),
+                _buildCounter(),
+                if (_listOpen) _buildRollList(),
+                const SizedBox(height: 14),
+
                 AnimatedContainer(
                   key: const Key('rollCard'),
                   duration: const Duration(milliseconds: 250),
@@ -664,7 +903,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         onChanged: _onRollIdChanged,
                         errorText: _rollIdError,
                         onSubmitted: (val) async {
-                          // Scan → duplicate check → Length (stay put on a duplicate).
+                          // Scan → duplicate check → Length (stay put on a duplicate or when empty).
                           final ok = await _checkRollIdDuplicate(val.trim());
                           if (!mounted) return;
                           if (!ok) { _rollIdFocusNode.requestFocus(); return; }
@@ -690,62 +929,55 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                             focusNode: _weightFocusNode,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             textInputAction: TextInputAction.done,
-                            // Enter on Weight (empty allowed) SAVES the roll.
-                            onSubmitted: (_) => _submit()),
+                            // Enter on Weight (empty allowed) ADDS the roll to the list.
+                            onSubmitted: (_) => _addRoll()),
                       ),
                     ]),
                     const SizedBox(height: 14),
                     _buildField('Notes (this roll)', _notesController,
+                        widgetKey: const Key('notesField'),
                         focusNode: _notesFocusNode,
                         textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _submit()),
-                    const SizedBox(height: 16),
-                    Row(children: [
-                      Expanded(
-                        child: Focus(
-                          focusNode: _submitFocusNode,
-                          child: SizedBox(
-                            height: 56,
-                            child: ElevatedButton.icon(
-                              key: const Key('submitButton'),
-                              onPressed: (_submitting || _rollIdError != null) ? null : _submit,
-                              icon: _submitting
-                                ? const SizedBox(width: 20, height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                : const Icon(Icons.download_rounded, size: 24),
-                              label: Text(_submitting ? 'Saving...' : 'Receive Roll',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kBrandColor,
-                                foregroundColor: Colors.white),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        height: 56,
-                        child: OutlinedButton(
-                          key: const Key('clearRollButton'),
-                          onPressed: _clearRollFields,
-                          child: const Text('Clear roll', style: TextStyle(fontSize: 18)),
-                        ),
-                      ),
-                    ]),
+                        // Tap in, type, Enter completes the roll.
+                        onSubmitted: (_) => _addRoll()),
                   ]),
                 ),
+                const SizedBox(height: 22),
 
-                // ── 3. RUNNING LIST ────────────────────────────────────────
-                if (_sessionRolls.isNotEmpty) ...[
-                  const SizedBox(height: 22),
-                  _sectionTitle('This delivery',
-                      trailing: _Chip(text: '$_liveCount', color: kBrandColor, fg: Colors.white, key: const Key('sessionCount'))),
-                  if (_headerSummary().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4, bottom: 6),
-                      child: Text(_headerSummary(), style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                // ── 3. ONE Submit at the bottom ────────────────────────────
+                Row(children: [
+                  Expanded(
+                    child: Text(
+                      _count == 0
+                          ? 'No rolls yet'
+                          : '$_countLabel ready${_headerSummary().isEmpty ? '' : ' · ${_headerSummary()}'}',
+                      key: const Key('submitSummary'),
+                      style: const TextStyle(fontSize: 14, color: Colors.black54)),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    height: 56,
+                    width: 180,
+                    child: ElevatedButton(
+                      key: const Key('submitButton'),
+                      onPressed: (_submitting || _count == 0) ? null : _submitShipment,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kBrandColor,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: const Color(0xFFE0E0E0),
+                        disabledForegroundColor: Colors.black38),
+                      child: _submitting
+                        ? const SizedBox(width: 22, height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Submit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
-                  ..._sessionRolls.asMap().entries.map((e) => _sessionRow(_sessionRolls.length - e.key, e.value)),
+                  ),
+                ]),
+
+                // ── 4. RESULT of the last submit, with per-roll Undo ───────
+                if (_lastSubmitted != null && _lastSubmitted!.isNotEmpty) ...[
+                  const SizedBox(height: 26),
+                  _buildResult(),
                 ],
                 const SizedBox(height: 24),
               ],
@@ -755,24 +987,251 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
-  Widget _sectionTitle(String text, {String? subtitle, Widget? trailing}) {
+  Widget _sectionTitle(String text, {Widget? trailing}) {
     return Row(children: [
       Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87)),
-      if (subtitle != null) ...[
-        const SizedBox(width: 8),
-        Text('— $subtitle', style: const TextStyle(fontSize: 13, color: Colors.black54)),
-      ],
       const Spacer(),
       if (trailing != null) trailing,
     ]);
   }
 
-  Widget _sessionRow(int n, _SessionRoll r) {
+  /// "N rolls" tile — tapping expands the list INLINE (no popup).
+  Widget _buildCounter() {
+    final radius = BorderRadius.vertical(
+        top: const Radius.circular(10), bottom: Radius.circular(_listOpen ? 0 : 10));
+    return Material(
+      color: const Color(0xFFF7F9FF),
+      borderRadius: radius,
+      child: InkWell(
+        key: const Key('rollCounter'),
+        onTap: () => setState(() {
+          _listOpen = !_listOpen;
+          if (!_listOpen) _openRollKey = null;
+        }),
+        borderRadius: radius,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFDBE4F3)),
+            borderRadius: radius,
+          ),
+          child: Row(children: [
+            _Chip(text: '$_count', color: kBrandColor, fg: Colors.white, key: const Key('rollCount')),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('${_count == 1 ? 'roll' : 'rolls'} in this shipment — not yet submitted',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+            ),
+            Icon(_listOpen ? Icons.expand_less : Icons.expand_more, color: kBrandColor),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRollList() {
+    return Container(
+      key: const Key('rollList'),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      decoration: const BoxDecoration(
+        color: Color(0xFFFBFCFF),
+        border: Border(
+          left: BorderSide(color: Color(0xFFDBE4F3)),
+          right: BorderSide(color: Color(0xFFDBE4F3)),
+          bottom: BorderSide(color: Color(0xFFDBE4F3)),
+        ),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(child: Text('Tap a roll to edit or remove it', style: TextStyle(fontSize: 13, color: Colors.black54))),
+          TextButton.icon(
+            key: const Key('collapseListButton'),
+            onPressed: () => setState(() { _listOpen = false; _openRollKey = null; }),
+            icon: const Icon(Icons.expand_less, size: 20),
+            label: const Text('Collapse'),
+          ),
+        ]),
+        if (_rolls.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('No rolls yet — scan the first roll below.', style: TextStyle(fontSize: 13, color: Colors.black54)),
+          ),
+        ..._rolls.asMap().entries.map((e) => _rollTile(e.key + 1, e.value)),
+      ]),
+    );
+  }
+
+  Widget _rollTile(int n, _ShipRoll r) {
+    final open = _openRollKey == r.key;
+    final err = r.serverError;
+    return Container(
+      key: Key('rollRow-${r.rollId}'),
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: err != null ? const Color(0xFFFFF5F5) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: err != null ? const Color(0xFFE57373) : Colors.black12),
+      ),
+      child: Column(children: [
+        InkWell(
+          key: Key('rollRowHead-${r.rollId}'),
+          onTap: () => setState(() => _openRollKey = open ? null : r.key),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+            child: Row(children: [
+              SizedBox(width: 26, child: Text('$n', style: const TextStyle(fontSize: 13, color: Colors.black54))),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(r.rollId, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.black87)),
+                  Text('${r.materialType ?? '—'} / ${r.basisWeight ?? '—'} / ${r.width == null ? '—' : '${r.width}"'}'
+                      '  ·  L ${_fmt(r.length)}  ·  W ${_fmt(r.weight)}${r.notes.isEmpty ? '' : '  ·  📝'}',
+                      style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                  if (err != null)
+                    Text('⚠ $err', style: const TextStyle(fontSize: 13, color: Color(0xFFC62828), fontWeight: FontWeight.bold)),
+                ]),
+              ),
+              Icon(open ? Icons.expand_less : Icons.expand_more, color: kBrandColor),
+            ]),
+          ),
+        ),
+        if (open) _rollEditor(r),
+      ]),
+    );
+  }
+
+  /// Editable details of one unsubmitted roll — length, weight, notes and the
+  /// header values it carries — plus Remove. All local.
+  Widget _rollEditor(_ShipRoll r) {
+    const numType = TextInputType.numberWithOptions(decimal: true);
+    List<String> withCurrent(List<String> items, String? v) =>
+        (v == null || items.contains(v)) ? items : [...items, v];
+    InputDecoration deco(String label) => InputDecoration(
+        labelText: label, border: const OutlineInputBorder(), isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10));
+    return Container(
+      key: Key('rollEditor-${r.rollId}'),
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+      decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.black12))),
+      child: Column(children: [
+        Row(children: [
+          Expanded(
+            child: TextFormField(
+              key: ValueKey('edit-length-${r.key}'),
+              initialValue: r.length == null ? '' : _fmt(r.length),
+              keyboardType: numType,
+              decoration: deco('Length (ft)'),
+              onChanged: (v) {
+                final t = v.trim();
+                if (t.isNotEmpty && double.tryParse(t) == null) return;
+                _editRoll(r, () => r.length = t.isEmpty ? null : double.tryParse(t));
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextFormField(
+              key: ValueKey('edit-weight-${r.key}'),
+              initialValue: r.weight == null ? '' : _fmt(r.weight),
+              keyboardType: numType,
+              decoration: deco('Weight (lbs)'),
+              onChanged: (v) {
+                final t = v.trim();
+                if (t.isNotEmpty && double.tryParse(t) == null) return;
+                _editRoll(r, () => r.weight = t.isEmpty ? null : double.tryParse(t));
+              },
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        TextFormField(
+          key: ValueKey('edit-notes-${r.key}'),
+          initialValue: r.notes,
+          decoration: deco('Notes'),
+          onChanged: (v) => _editRoll(r, () => r.notes = v.trim()),
+        ),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          // key carries the value so an interlock change (Crepe) re-seeds the field
+          key: ValueKey('edit-material-${r.key}-${r.materialType}'),
+          initialValue: r.materialType,
+          isExpanded: true,
+          decoration: deco('Material Type'),
+          items: withCurrent(_materialTypes, r.materialType)
+              .map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+          onChanged: (v) => _editRoll(r, () {
+            r.materialType = v;
+            if (v == 'Crepe') r.basisWeight = 'Crepe';
+          }),
+        ),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('edit-basis-${r.key}-${r.basisWeight}'),
+              initialValue: r.basisWeight,
+              isExpanded: true,
+              decoration: deco('Basis Weight'),
+              items: withCurrent(_basisWeights, r.basisWeight)
+                  .map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+              onChanged: (v) => _editRoll(r, () {
+                r.basisWeight = v;
+                if (v == 'Crepe') r.materialType = 'Crepe';
+              }),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('edit-width-${r.key}-${r.width}'),
+              initialValue: r.width,
+              isExpanded: true,
+              decoration: deco('Width (in)'),
+              items: withCurrent(_widths, r.width)
+                  .map((m) => DropdownMenuItem(value: m, child: Text('$m"'))).toList(),
+              onChanged: (v) => _editRoll(r, () => r.width = v),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          OutlinedButton.icon(
+            key: Key('removeRoll-${r.rollId}'),
+            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFC62828), side: const BorderSide(color: Color(0xFFE57373))),
+            onPressed: () => _removeRoll(r),
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('Remove from shipment'),
+          ),
+          const SizedBox(width: 10),
+          TextButton(
+            onPressed: () => setState(() => _openRollKey = null),
+            child: const Text('Done'),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _buildResult() {
+    final rows = _lastSubmitted!;
+    final live = rows.where((r) => !r.undone).length;
+    final at = _lastSubmittedAt;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _sectionTitle('Submitted — $live ${live == 1 ? 'roll' : 'rolls'} received',
+          trailing: Text(
+              '${_lastVendor ?? ''}${_lastPo == null ? '' : ' · PO $_lastPo'}'
+              '${at == null ? '' : ' · ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}'}',
+              style: const TextStyle(fontSize: 13, color: Colors.black54))),
+      ...rows.asMap().entries.map((e) => _resultRow(e.key + 1, e.value)),
+    ]);
+  }
+
+  Widget _resultRow(int n, _ShipRoll r) {
     final muted = TextStyle(fontSize: 13, color: r.undone ? Colors.black38 : Colors.black54,
         decoration: r.undone ? TextDecoration.lineThrough : null);
-    String fmt(double? v) => v == null ? '—' : (v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString());
     return Container(
-      key: Key('sessionRow-${r.rollId}'),
+      key: Key('resultRow-${r.rollId}'),
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
       decoration: BoxDecoration(
@@ -788,9 +1247,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 color: r.undone ? Colors.black38 : Colors.black87,
                 decoration: r.undone ? TextDecoration.lineThrough : null)),
             Text('${r.materialType ?? '—'} / ${r.basisWeight ?? '—'} / ${r.width == null ? '—' : '${r.width}"'}'
-                '  ·  L ${fmt(r.length)}  ·  W ${fmt(r.weight)}'
-                '  ·  ${r.savedAt.hour.toString().padLeft(2, '0')}:${r.savedAt.minute.toString().padLeft(2, '0')}',
-                style: muted),
+                '  ·  L ${_fmt(r.length)}  ·  W ${_fmt(r.weight)}', style: muted),
           ]),
         ),
         if (r.undone)
@@ -896,8 +1353,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         ),
         onChanged: (val) {
           FocusManager.instance.primaryFocus?.unfocus();
-          if (val == null) { setState(() => _selectedVendor = null); return; }
+          if (val == null) { setState(() => _selectedVendor = null); _persistDraft(); return; }
           setState(() => _selectedVendor = val.split(' — ')[0]);
+          _persistDraft();
           FieldFocus.advance(context, target: _poFocusNode);
         },
       ),

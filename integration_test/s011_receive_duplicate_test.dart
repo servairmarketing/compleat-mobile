@@ -1,8 +1,9 @@
-// S011: duplicate Roll ID rejected, form preserved.
+// S011: duplicate Roll ID is refused before it reaches the list (rev 2).
 //
 // Backend assumption: parent roll TEST-PARENT-001 already exists in the
-// test Firestore so the receive endpoint returns a duplicate-key error.
+// test Firestore so GET /rolls/TEST-PARENT-001 answers with the roll.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
 
@@ -10,44 +11,38 @@ import 'common.dart';
 
 void main() {
   patrolTest(
-    'S011: duplicate Roll ID rejected, form preserved',
+    'S011: duplicate Roll ID keeps focus, is not added to the list',
     ($) async {
       await loginAsJoseph($);
       await openReceive($);
 
-      const dupId = 'TEST-PARENT-001';
-      await $(#rollIdField).enterText(dupId);
-
       await $(#vendorDropdown).tap();
       await $('TESTVEND1').scrollTo().tap();
-
       await $(#poNumberField).enterText('PO-RCV-DUP');
-
       await $(#materialTypeDropdown).tap();
       await $(find.text('Virgin')).scrollTo().tap();
-
       await $(#basisWeightDropdown).tap();
       await $(find.text('24')).scrollTo().tap();
-
       await $(#widthDropdown).tap();
       await $(find.text('69')).scrollTo().tap();
 
-      await $(#lengthField).enterText('50000');
-      await $(#weightField).enterText('3000');
+      const dupId = 'TEST-PARENT-001';
+      await $(#rollIdField).enterText(dupId);
+      // Scanner Enter → duplicate check.
+      await $.tester.testTextInput.receiveAction(TextInputAction.done);
+      await $.pumpAndSettle(timeout: const Duration(seconds: 8));
 
-      await $(#submitButton).tap();
+      // (a) UI: inline error under the Roll ID field.
+      expect(find.textContaining('already exists'), findsOneWidget,
+          reason: 'Duplicate must be flagged inline on scan');
 
-      // (a) UI: error banner appears.
-      await $(#messageBannerError).waitUntilVisible(
-        timeout: const Duration(seconds: 8),
-      );
+      // (b) the roll was NOT added: counter still 0, Submit disabled.
+      expect($(#rollCount).$('0'), findsOneWidget);
 
-      // (b) negative: no success banner.
-      expect($(#messageBannerSuccess), findsNothing);
-
-      // (c) state: form NOT cleared -- typed Roll ID still on screen.
+      // (c) state: the typed id is preserved for correction.
       expect(find.text(dupId), findsOneWidget,
-          reason: 'Failed submit must preserve user input');
+          reason: 'A refused scan must keep the operator\'s input');
+      expect($(#messageBannerSuccess), findsNothing);
     },
   );
 }

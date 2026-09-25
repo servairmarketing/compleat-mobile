@@ -1,7 +1,7 @@
-// S013: Crepe interlock pairs Material Type and Basis Weight.
+// S013: Crepe interlock pairs Material Type and Basis Weight (rev 2 screen).
 //
 // Selecting 'Crepe' in either dropdown auto-sets the other to 'Crepe'.
-// See lib/screens/receive_screen.dart:271-300 for the interlock logic.
+// See lib/screens/receive_screen.dart (Shipment Details dropdowns).
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
@@ -27,9 +27,8 @@ void main() {
       // (b) negative: no error banner -- benign UX, not an error.
       expect($(#messageBannerError), findsNothing);
 
-      // Reset the form. Clear button has no Key, but its label is unique
-      // on this screen.
-      await $('Clear').tap();
+      // Reset the screen: "New shipment" (no rolls in the list → no confirm).
+      await $(#newShipmentButton).tap();
       await $.pumpAndSettle();
 
       // Reverse direction: Basis Weight = Crepe should auto-set Material

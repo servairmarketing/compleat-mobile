@@ -1,8 +1,10 @@
-// S012: submit with empty required fields shows validation banner.
+// S012: adding a roll without the shipment header shows the validation dialog (rev 2).
 //
-// Roll ID is OPTIONAL on this screen (auto-generated server-side when
-// blank). The validation gate is on Vendor / Material Type / Basis Weight.
+// Roll ID is REQUIRED; Vendor / Material Type / Basis Weight / Width are
+// required too. Enter on Weight with an empty header must be blocked at the
+// client gate in _addRoll() before anything is added or sent.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
 
@@ -10,31 +12,26 @@ import 'common.dart';
 
 void main() {
   patrolTest(
-    'S012: submit with empty required fields shows validation banner',
+    'S012: Enter on Weight with empty header shows the validation dialog',
     ($) async {
       await loginAsJoseph($);
       await openReceive($);
 
-      // No fields filled -- Roll ID is optional, but Vendor / Material /
-      // Basis Weight are not. Submit should be blocked at the client
-      // gate in _submit() before any API call is made.
-      await $(#submitButton).tap();
+      // Only a Roll ID, no header — then Enter on Weight (the add gesture).
+      await $(#rollIdField).enterText('RCV-MISSING-${DateTime.now().millisecondsSinceEpoch}');
+      await $(#weightField).tap();
+      await $.tester.testTextInput.receiveAction(TextInputAction.done);
+      await $.pumpAndSettle();
 
-      // (a) UI: error banner with the required-fields message. Match by
-      // substring rather than exact text so a copy tweak won't break this.
-      await $(#messageBannerError).waitUntilVisible(
-        timeout: const Duration(seconds: 3),
-      );
-      expect(find.textContaining('are required'), findsOneWidget,
-          reason: 'Banner should describe which fields are required');
+      // (a) UI: the shared validation dialog lists the missing header fields.
+      expect(find.textContaining('Vendor is required'), findsOneWidget,
+          reason: 'Dialog should name the missing header fields');
 
-      // (b) negative: no success banner, still on Receive screen.
+      // (b) negative: nothing added, Submit disabled, still on Receive.
+      expect($(#rollCount).$('0'), findsOneWidget);
       expect($(#messageBannerSuccess), findsNothing);
       expect($(#rollIdField), findsOneWidget,
-          reason: 'Receive screen should still be on top after blocked submit');
-
-      // (c) state: nothing typed in -- Roll ID field stays empty. Implicit
-      // since we never entered any text.
+          reason: 'Receive screen should still be on top after a blocked add');
     },
   );
 }
