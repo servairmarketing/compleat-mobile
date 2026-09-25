@@ -112,6 +112,11 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/compleat-release.jks
       - run: flutter pub get
+      - name: Run unit tests
+        # Joe's ruling 2026-09-25: the detector unit tests (test/) must EXECUTE
+        # in CI — no local Flutter runs in Cloud Shell. Runs before the build,
+        # so a red test never publishes a test-v* pre-release.
+        run: flutter test --reporter expanded
       - name: Build signed test APK
         run: |
           flutter build apk --release --flavor qa \
