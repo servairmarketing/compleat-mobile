@@ -108,7 +108,7 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73)
+### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74)
 A shipment is many rolls of one variety: fill the shared info once, scan roll after roll into
 an on-screen LIST, then press ONE Submit — the same pattern as Roll Production. Rolls are NOT
 saved as they are scanned; nothing reaches the server until Submit.
@@ -133,6 +133,22 @@ saved as they are scanned; nothing reaches the server until Submit.
      is ADDED TO THE LIST (haptic pulse + green flash + counter ticks) → cursor back to
      Roll ID. Enter on an EMPTY field skips it (scan → Enter → Enter adds a roll with no
      length/weight). Notes: tap in, type, Enter completes the roll.
+   - NO-READ = SKIP (Joe's ruling 2026-09-25, option 1, v1.0.74): pulling the scan TRIGGER with
+     nothing to decode behaves exactly like Enter on the focused entry field (Roll ID with a
+     value → duplicate check → Length; Length → Weight; Weight / Notes → the roll is ADDED). An
+     EMPTY Roll ID is the one exception (nothing to skip to — ignored). Mechanism: DataWedge
+     keystroke output sends NOTHING on a no-read, so the app registers for DataWedge's
+     SCANNER_STATUS notifications (Notification API, DataWedge ≥ 6.4; native
+     `ScannerStatusPlugin.kt` → EventChannel `com.compleat/scanner_status` →
+     `services/scanner_status_service.dart`). `NoReadDetector`: SCANNING (beam on) followed by
+     WAITING/IDLE (beam off) with no text arriving in any entry field during the beam or within
+     a 400 ms grace window = one no-read; a real decode (keystrokes) never counts. GRACEFUL
+     DEGRADATION: on a device without DataWedge nothing fires and the keyboard Enter stays the
+     skip — no crash, no delay. TEST builds only: a small grey "Scanner diag" line under the
+     Rolls card shows listening state, no-read count, last status and last hardware KEY event
+     (MainActivity forwards every KeyEvent — diagnostics only, the skip is never driven by key
+     events); it tells the TC22 walkthrough whether the trigger key is visible to the app.
+     Unit tests: `test/no_read_detector_test.dart`. Other screens can opt in the same way.
    - No "scan → Enter → Enter → Enter" hint text; no "Receive Roll" / "Clear roll" buttons.
 3. SUBMIT (one plain button at the bottom, no icon; disabled until the list has a roll):
    POST /rolls/receive/batch {vendor_id, po_number, submit_id, rolls:[{roll_id, material_type,

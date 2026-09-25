@@ -9,6 +9,7 @@ import '../services/api_service.dart';
 import '../services/parent_validation.dart';
 import '../services/local_db.dart';
 import '../services/field_focus.dart';
+import '../services/scanner_status_service.dart';
 import '../widgets/load_error_card.dart';
 import 'login_screen.dart';
 import 'validation_dialog.dart';
@@ -156,6 +157,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   String? _rollIdError;          // shown under the Roll ID field
   String _lastCheckedRollId = '';// avoid hitting the API for unchanged value
 
+  // Joe's ruling 2026-09-25 (option 1) — "no-read = skip": a scan-trigger pull
+  // with nothing to decode advances the cursor exactly like Enter on the
+  // focused entry field. DataWedge keystroke output sends nothing on a
+  // no-read, so we listen to DataWedge SCANNER_STATUS instead (see
+  // scanner_status_service.dart). Silent on a device without DataWedge.
+  late final NoReadDetector _noRead = NoReadDetector(onNoRead: _onNoRead);
+  StreamSubscription<ScannerEvent>? _scanSub;
+  // Walkthrough diagnostics (TEST builds only): last status / last key seen.
+  String _diagStatus = '';
+  String _diagKey = '';
+  bool _scannerListening = false;
+
   static String _newSubmitId() {
     final r = Random();
     return '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-'
@@ -174,6 +187,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     for (final c in [_rollIdController, _poController, _lengthController, _weightController, _notesController]) {
       c.addListener(_persistDraft);
     }
+    // No-read detection: any text arriving in an entry field means the pull
+    // decoded something (DataWedge keystrokes), so it is NOT a no-read.
+    for (final c in [_rollIdController, _lengthController, _weightController, _notesController]) {
+      c.addListener(_noRead.noteInput);
+    }
+    _scanSub = ScannerStatusService.instance.events.listen(_onScannerEvent);
     // Check for duplicate Roll ID when the field loses focus (typed entry).
     // Scan-completed events fire onSubmitted, which is wired separately.
     _rollIdFocusNode.addListener(() {
@@ -189,6 +208,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     // controllers BEFORE disposing them, then write (fire-and-forget).
     _persistTimer?.cancel();
     _persistDraftNow();
+    _scanSub?.cancel();
+    _noRead.dispose();
     _rollIdController.dispose();
     _poController.dispose();
     _lengthController.dispose();
@@ -449,6 +470,57 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   // ── Add one roll to the LIST (local; nothing is sent to the server) ────────
+  void _onScannerEvent(ScannerEvent e) {
+    if (!mounted) return;
+    if (e.isStatus) {
+      _noRead.onStatus(e.status);
+      if (appEnvironment == 'test') setState(() => _diagStatus = e.toString());
+    } else if (e.isKey) {
+      // Diagnostics only — tells the TC22 walkthrough whether the scan trigger
+      // key is ever visible to the app (Joe's requirement 2). Skip is NOT
+      // driven by key events.
+      if (appEnvironment == 'test' && e.action == 0) setState(() => _diagKey = e.toString());
+    } else if (e.type == 'listening') {
+      if (appEnvironment == 'test') setState(() => _scannerListening = true);
+    }
+  }
+
+  /// A trigger pull that decoded nothing: behave exactly like Enter on the
+  /// focused entry field. An EMPTY Roll ID is the one exception — there is
+  /// nothing to skip to without a roll, so the pull is ignored there.
+  Future<void> _onNoRead() async {
+    if (!mounted || _submitting) return;
+    if (appEnvironment == 'test') setState(() {});   // refresh the no-read counter
+    if (_rollIdFocusNode.hasFocus) {
+      final val = _rollIdController.text.trim();
+      if (val.isEmpty) return;
+      final ok = await _checkRollIdDuplicate(val);
+      if (!mounted) return;
+      if (!ok) { _rollIdFocusNode.requestFocus(); return; }
+      FieldFocus.advance(context, target: _lengthFocusNode);
+    } else if (_lengthFocusNode.hasFocus) {
+      FieldFocus.advance(context, target: _weightFocusNode);
+    } else if (_weightFocusNode.hasFocus || _notesFocusNode.hasFocus) {
+      await _addRoll();
+    }
+    // Header fields / nothing focused: a no-read means nothing there.
+  }
+
+  /// TEST builds only: one small grey line under the Rolls card so the
+  /// walkthrough on the real TC22 can read what DataWedge delivers.
+  Widget _buildScannerDiagnostics() {
+    if (appEnvironment != 'test') return const SizedBox.shrink();
+    final txt = 'Scanner diag · ${_scannerListening ? 'listening' : 'not listening'}'
+        ' · no-reads ${_noRead.noReads}'
+        '${_diagStatus.isEmpty ? '' : ' · last $_diagStatus'}'
+        '${_diagKey.isEmpty ? '' : ' · last $_diagKey'}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(txt, key: const Key('scannerDiag'),
+          style: const TextStyle(fontSize: 11, color: Colors.black45)),
+    );
+  }
+
   Future<void> _addRoll() async {
     final issues = _headerIssues();
     final rollId = ParentValidation.normalizeRollId(_rollIdController.text);
@@ -942,6 +1014,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                         onSubmitted: (_) => _addRoll()),
                   ]),
                 ),
+                _buildScannerDiagnostics(),
                 const SizedBox(height: 22),
 
                 // ── 3. ONE Submit at the bottom ────────────────────────────
