@@ -27,8 +27,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// scanner reported the trigger as hardware key 563): the scan-trigger KEY
 /// itself — down arms the detector, up starts the grace window — so a
 /// device without DataWedge gets the same no-read = skip. The key code is
-/// configurable ([ScannerStatusService.triggerKeyCode], Settings → Scanner,
-/// default [kDefaultTriggerKeyCode]) and always visible in the diagnostics.
+/// configurable as a SET ([ScannerStatusService.triggerKeyCodes], Settings → Scanner,
+/// default [kDefaultTriggerKeyCodes] = both buttons of Joe's scanner) and always
+/// visible in the diagnostics.
 /// Both feeds drive ONE detector, which fires at most once per pull.
 class ScannerEvent {
   final String type;            // 'status' | 'key' | 'listening'
@@ -108,11 +109,13 @@ enum ScannerListenState {
   closed,       // the platform closed the stream (details in reason)
 }
 
-/// Hardware key code of the scan trigger on Joe's non-Zebra test scanner
-/// (VERIFIED from the Receive diag line 2026-09-25: "last key 563(563) down").
-/// A default, not a rule — see [ScannerStatusService.triggerKeyCode].
-const int kDefaultTriggerKeyCode = 563;
-const String kTriggerKeyCodePref = 'scanner_trigger_keycode';
+/// Hardware key codes of the scan trigger(s). Joe's non-Zebra test scanner
+/// has TWO scan buttons: 563 (VERIFIED from the Receive diag 2026-09-25) and
+/// 564 (VERIFIED by Joe the same day — setting 564 made the skip fire). A
+/// default SET, not a rule — see [ScannerStatusService.triggerKeyCodes].
+const Set<int> kDefaultTriggerKeyCodes = {563, 564};
+const String kTriggerKeyCodesPref = 'scanner_trigger_keycodes';        // StringList of ints (v1.0.78+)
+const String kLegacyTriggerKeyCodePref = 'scanner_trigger_keycode';    // single int (v1.0.75–77), migrated once
 
 class ScannerStatusService {
   ScannerStatusService._();
@@ -120,33 +123,58 @@ class ScannerStatusService {
 
   static const EventChannel _channel = EventChannel('com.compleat/scanner_status');
 
-  /// The key code treated as the scan trigger. Persisted in SharedPreferences;
-  /// [loadTriggerKeyCode] reads it once, [setTriggerKeyCode] saves it.
-  int triggerKeyCode = kDefaultTriggerKeyCode;
+  /// The key codes treated as the scan trigger (any of them). Persisted in
+  /// SharedPreferences; [loadTriggerKeyCodes] reads once, the setters save.
+  Set<int> triggerKeyCodes = {...kDefaultTriggerKeyCodes};
   bool _prefLoaded = false;
 
-  Future<int> loadTriggerKeyCode() async {
-    if (_prefLoaded) return triggerKeyCode;
+  /// "563, 564" — sorted, for the diagnostics and the settings screen.
+  String get triggerKeysText =>
+      triggerKeyCodes.isEmpty ? 'none (trigger-skip off)' : (triggerKeyCodes.toList()..sort()).join(', ');
+
+  Future<Set<int>> loadTriggerKeyCodes() async {
+    if (_prefLoaded) return triggerKeyCodes;
     try {
       final prefs = await SharedPreferences.getInstance();
-      triggerKeyCode = prefs.getInt(kTriggerKeyCodePref) ?? kDefaultTriggerKeyCode;
+      final saved = prefs.getStringList(kTriggerKeyCodesPref);
+      if (saved != null) {
+        triggerKeyCodes = saved.map(int.tryParse).whereType<int>().toSet();
+      } else {
+        // First run on this build: start from the defaults and keep a code the
+        // operator saved on v1.0.75–77 (single-key setting), then retire it.
+        triggerKeyCodes = {...kDefaultTriggerKeyCodes};
+        final legacy = prefs.getInt(kLegacyTriggerKeyCodePref);
+        if (legacy != null) {
+          triggerKeyCodes.add(legacy);
+          await prefs.setStringList(kTriggerKeyCodesPref, _encode(triggerKeyCodes));
+          await prefs.remove(kLegacyTriggerKeyCodePref);
+        }
+      }
     } catch (_) {
-      triggerKeyCode = kDefaultTriggerKeyCode;
+      triggerKeyCodes = {...kDefaultTriggerKeyCodes};
     }
     _prefLoaded = true;
-    return triggerKeyCode;
+    _notify();
+    return triggerKeyCodes;
   }
 
-  Future<void> setTriggerKeyCode(int code) async {
-    triggerKeyCode = code;
+  static List<String> _encode(Set<int> codes) => (codes.toList()..sort()).map((c) => '$c').toList();
+
+  Future<void> setTriggerKeyCodes(Set<int> codes) async {
+    triggerKeyCodes = codes.where((c) => c >= 0).toSet();
     _prefLoaded = true;
+    _notify();
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(kTriggerKeyCodePref, code);
+      await prefs.setStringList(kTriggerKeyCodesPref, _encode(triggerKeyCodes));
     } catch (_) {}
   }
 
-  bool isTriggerKey(ScannerEvent e) => e.isKey && e.keyCode == triggerKeyCode;
+  Future<void> addTriggerKeyCode(int code) => setTriggerKeyCodes({...triggerKeyCodes, code});
+  Future<void> removeTriggerKeyCode(int code) => setTriggerKeyCodes({...triggerKeyCodes}..remove(code));
+  Future<void> resetTriggerKeyCodes() => setTriggerKeyCodes({...kDefaultTriggerKeyCodes});
+
+  bool isTriggerKey(ScannerEvent e) => e.isKey && triggerKeyCodes.contains(e.keyCode);
 
   final StreamController<ScannerEvent> _out = StreamController<ScannerEvent>.broadcast();
   StreamSubscription<dynamic>? _platformSub;
@@ -346,6 +374,8 @@ class ScannerStatusService {
     _ackTimer?.cancel();
     await _platformSub?.cancel();
     _platformSub = null;
+    _prefLoaded = false;
+    triggerKeyCodes = {...kDefaultTriggerKeyCodes};
     state = ScannerListenState.idle;
     reason = '';
     stateAt = null;

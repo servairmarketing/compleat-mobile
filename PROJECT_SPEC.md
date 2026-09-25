@@ -108,7 +108,7 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74, trigger-key feed v1.0.75, durable listener state + Dart key feed v1.0.77)
+### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74, trigger-key feed v1.0.75, durable listener state + Dart key feed v1.0.77, multiple trigger keys v1.0.78)
 A shipment is many rolls of one variety: fill the shared info once, scan roll after roll into
 an on-screen LIST, then press ONE Submit — the same pattern as Roll Production. Rolls are NOT
 saved as they are scanned; nothing reaches the server until Submit.
@@ -173,6 +173,16 @@ saved as they are scanned; nothing reaches the server until Submit.
      Android codes arrive as `keyCode | androidPlane`, so 563 is still 563 (`androidKeyCodeFromKeyId`).
      Both key feeds drive the same detector (a second down re-arms, a second up finds nothing armed →
      still one no-read per pull). Diag "last key … via native|dart" tells which feed saw it.
+     RESOLVED 2026-09-25 (Joe, test-v1.0.77): the trigger-skip WORKS on the non-Zebra scanner — the
+     diag showed the button he pressed reports key 564 while the app watched 563; the device has TWO
+     scan buttons (563 and 564). MULTIPLE TRIGGER KEYS (Joe's ruling, v1.0.78): the setting is a SET,
+     default {563, 564}, SharedPreferences `scanner_trigger_keycodes` (string list; the v1.0.75–77
+     single-int `scanner_trigger_keycode` is migrated once — kept AND added to the defaults, then
+     removed). Settings → Scanner Settings shows the keys as removable chips, an "Add a key code"
+     field, "Add key N as a scan trigger" under the LAST KEY SEEN when that key is new, and "Reset to
+     defaults". Removing every key turns trigger-skip OFF (stated on screen). Any key in the set arms
+     the same detector → one no-read per pull whichever button (or both) is pressed. The non-Zebra
+     device is VERIFIED for trigger-skip; the TC22 Zebra walkthrough is the last gate before LIVE.
    - No "scan → Enter → Enter → Enter" hint text; no "Receive Roll" / "Clear roll" buttons.
 3. SUBMIT (one plain button at the bottom, no icon; disabled until the list has a roll):
    POST /rolls/receive/batch {vendor_id, po_number, submit_id, rolls:[{roll_id, material_type,

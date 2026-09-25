@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:compleat_mobile/services/scanner_status_service.dart';
 
 void main() {
@@ -222,18 +223,76 @@ void main() {
     await svc.reset();
   });
 
-  test('isTriggerKey follows the configured code (default 563)', () {
+  test('isTriggerKey follows the configured SET (default 563 + 564)', () async {
     final svc = ScannerStatusService.instance;
-    expect(svc.triggerKeyCode, kDefaultTriggerKeyCode);
-    final k563 = ScannerEvent(type: 'key', keyCode: 563, action: 0, at: DateTime.now());
-    final k104 = ScannerEvent(type: 'key', keyCode: 104, action: 0, at: DateTime.now());
+    await svc.reset();
+    expect(svc.triggerKeyCodes, kDefaultTriggerKeyCodes);
+    expect(svc.triggerKeysText, '563, 564');
+    ScannerEvent key(int c, int action) => ScannerEvent(type: 'key', keyCode: c, action: action, at: DateTime.now());
     final st = ScannerEvent(type: 'status', status: 'SCANNING', at: DateTime.now());
-    expect(svc.isTriggerKey(k563), true);
-    expect(svc.isTriggerKey(k104), false);
+    expect(svc.isTriggerKey(key(563, 0)), true);
+    expect(svc.isTriggerKey(key(564, 0)), true);
+    expect(svc.isTriggerKey(key(104, 0)), false);
     expect(svc.isTriggerKey(st), false);
-    svc.triggerKeyCode = 104;
-    expect(svc.isTriggerKey(k104), true);
-    expect(svc.isTriggerKey(k563), false);
-    svc.triggerKeyCode = kDefaultTriggerKeyCode;
+    await svc.addTriggerKeyCode(104);
+    expect(svc.isTriggerKey(key(104, 0)), true);
+    expect(svc.triggerKeysText, '104, 563, 564');
+    await svc.removeTriggerKeyCode(563);
+    expect(svc.isTriggerKey(key(563, 0)), false);
+    expect(svc.isTriggerKey(key(564, 0)), true);
+    await svc.removeTriggerKeyCode(564);
+    await svc.removeTriggerKeyCode(104);
+    expect(svc.triggerKeyCodes, isEmpty);
+    expect(svc.triggerKeysText, contains('off'));
+    await svc.resetTriggerKeyCodes();
+    expect(svc.triggerKeyCodes, kDefaultTriggerKeyCodes);
+    await svc.reset();
+  });
+
+  test('either scan button gives exactly one no-read per pull', () async {
+    var fired = 0;
+    final d = NoReadDetector(onNoRead: () => fired++, grace: grace);
+    // button 563
+    d.onTriggerDown();
+    d.onTriggerUp();
+    await settle();
+    expect(fired, 1);
+    // button 564 — same detector, same behaviour
+    d.onTriggerDown();
+    d.onTriggerUp();
+    await settle();
+    expect(fired, 2);
+    // both buttons pressed in one pull (down 563, down 564, up 564, up 563)
+    d.onTriggerDown();
+    d.onTriggerDown();
+    d.onTriggerUp();
+    d.onTriggerUp();
+    await settle();
+    expect(fired, 3, reason: 'second down only re-arms, second up finds nothing armed');
+  });
+
+  test('loadTriggerKeyCodes: defaults, saved list, and legacy single-key migration', () async {
+    final svc = ScannerStatusService.instance;
+
+    SharedPreferences.setMockInitialValues({});
+    await svc.reset();
+    expect(await svc.loadTriggerKeyCodes(), kDefaultTriggerKeyCodes);
+
+    SharedPreferences.setMockInitialValues({kTriggerKeyCodesPref: ['103', 'junk', '563']});
+    await svc.reset();
+    expect(await svc.loadTriggerKeyCodes(), {103, 563});
+
+    // v1.0.75–77 saved one code (Joe saved 564): keep it AND the defaults, retire the old key.
+    SharedPreferences.setMockInitialValues({kLegacyTriggerKeyCodePref: 564});
+    await svc.reset();
+    expect(await svc.loadTriggerKeyCodes(), {563, 564});
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList(kTriggerKeyCodesPref), ['563', '564']);
+    expect(prefs.getInt(kLegacyTriggerKeyCodePref), isNull);
+
+    SharedPreferences.setMockInitialValues({kLegacyTriggerKeyCodePref: 999});
+    await svc.reset();
+    expect(await svc.loadTriggerKeyCodes(), {563, 564, 999});
+    await svc.reset();
   });
 }

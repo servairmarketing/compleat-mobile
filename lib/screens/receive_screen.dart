@@ -193,7 +193,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     for (final c in [_rollIdController, _lengthController, _weightController, _notesController]) {
       c.addListener(_noRead.noteInput);
     }
-    ScannerStatusService.instance.loadTriggerKeyCode();   // configured trigger key (default 563)
+    ScannerStatusService.instance.loadTriggerKeyCodes();  // configured trigger keys (default 563 + 564)
     _scanSub = ScannerStatusService.instance.events.listen(_onScannerEvent);
     ScannerStatusService.instance.changes.addListener(_onScannerChange);
     // Check for duplicate Roll ID when the field loses focus (typed entry).
@@ -519,7 +519,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (appEnvironment != 'test') return const SizedBox.shrink();
     final svc = ScannerStatusService.instance;
     final txt = 'Scanner diag · ${svc.stateText}'
-        ' · trigger key ${svc.triggerKeyCode}'
+        ' · trigger keys ${svc.triggerKeysText}'
         ' · no-reads ${_noRead.noReads}${_noRead.isArmed ? ' (armed)' : ''}'
         ' · ${svc.countersText}'
         '${svc.lastStatus == null ? '' : ' · last ${svc.lastStatus}'}'
