@@ -39,6 +39,8 @@ class ScannerEvent {
   final int action;             // for 'key': 0 = down, 1 = up
   final int scanCode;           // for 'key'
   final int repeat;             // for 'key'
+  final String src;             // 'native' (MainActivity.dispatchKeyEvent / DataWedge) | 'dart' (Flutter HardwareKeyboard)
+  final int keyId;              // for 'dart' keys: the raw Flutter LogicalKeyboardKey.keyId
   final DateTime at;
 
   const ScannerEvent({
@@ -50,6 +52,8 @@ class ScannerEvent {
     this.action = -1,
     this.scanCode = -1,
     this.repeat = 0,
+    this.src = 'native',
+    this.keyId = -1,
     required this.at,
   });
 
@@ -75,10 +79,33 @@ class ScannerEvent {
 
   @override
   String toString() => isKey
-      ? 'key $keyName($keyCode) ${action == 0 ? 'down' : action == 1 ? 'up' : action} scan=$scanCode'
+      ? 'key $keyName($keyCode) ${action == 0 ? 'down' : action == 1 ? 'up' : action} scan=$scanCode via $src'
       : isStatus
           ? 'status $status${profile.isEmpty ? '' : ' [$profile]'}'
           : type;
+}
+
+/// Android key code carried inside a Flutter [LogicalKeyboardKey.keyId] when
+/// the key has no Flutter mapping (the embedder emits `keyCode | androidPlane`
+/// — VERIFIED for the framework's Android key mapping in
+/// raw_keyboard_android.dart). Returns -1 for keys from any other plane, so a
+/// mapped key never masquerades as an Android code.
+int androidKeyCodeFromKeyId(int keyId) {
+  const int planeMask = ~0xFFFFFFFF;
+  if ((keyId & planeMask) != LogicalKeyboardKey.androidPlane) return -1;
+  return keyId & 0xFFFFFFFF;
+}
+
+/// Why the scanner listener is (not) running — shown verbatim in the TEST
+/// diagnostics so a "not listening" report explains itself.
+enum ScannerListenState {
+  idle,         // nobody has asked for events yet
+  starting,     // 'listen' sent to the native plugin, no answer yet
+  listening,    // native plugin answered: receiver registered, keys forwarded
+  noReply,      // native never answered within the ack window (plugin missing?)
+  unavailable,  // not Android / web — nothing to listen to
+  error,        // the platform stream reported an error (details in reason)
+  closed,       // the platform closed the stream (details in reason)
 }
 
 /// Hardware key code of the scan trigger on Joe's non-Zebra test scanner
@@ -123,52 +150,208 @@ class ScannerStatusService {
 
   final StreamController<ScannerEvent> _out = StreamController<ScannerEvent>.broadcast();
   StreamSubscription<dynamic>? _platformSub;
-  bool _started = false;
+  Timer? _ackTimer;
+  bool _dartKeysHooked = false;
+
+  /// How long we wait for the native plugin's 'listening' answer before
+  /// declaring [ScannerListenState.noReply].
+  static const Duration ackWindow = Duration(seconds: 3);
+
+  // ── Listener state — DURABLE (v1.0.77 fix). Before this, "listening" was a
+  // one-shot event consumed by whichever screen subscribed first (the new
+  // Scanner Settings screen, or an earlier Receive visit), so the Receive
+  // diag read "not listening" with no reason. Now the state lives here, every
+  // screen reads it, and a dead stream restarts on the next subscriber.
+  ScannerListenState state = ScannerListenState.idle;
+  String reason = '';
+  DateTime? stateAt;
+  int nativeEvents = 0;      // everything the native plugin delivered
+  int nativeKeyEvents = 0;
+  int statusEvents = 0;
+  int dartKeyEvents = 0;     // keys seen by Flutter's own HardwareKeyboard
+  ScannerEvent? lastKey;     // last key from EITHER feed (repeats excluded)
+  ScannerEvent? lastStatus;
+
+  /// Bumped on every state/counter change so screens can `setState`.
+  final ValueNotifier<int> changes = ValueNotifier<int>(0);
+
+  bool get isListening => state == ScannerListenState.listening;
+
+  /// Plain-words state for the diagnostics line, always with the WHY.
+  String get stateText {
+    final when = stateAt == null ? '' : ' ${_hhmmss(stateAt!)}';
+    switch (state) {
+      case ScannerListenState.idle:
+        return 'not listening — not started yet';
+      case ScannerListenState.starting:
+        return 'starting — listen sent to native$when, no reply yet';
+      case ScannerListenState.listening:
+        return 'listening (native ok$when)';
+      case ScannerListenState.noReply:
+        return 'NOT listening — native plugin never answered within ${ackWindow.inSeconds} s (plugin missing in this build?)';
+      case ScannerListenState.unavailable:
+        return 'NOT listening — $reason';
+      case ScannerListenState.error:
+        return 'NOT listening — platform stream error$when: $reason';
+      case ScannerListenState.closed:
+        return 'NOT listening — platform closed the stream$when: $reason';
+    }
+  }
+
+  /// One-line counters for the diagnostics.
+  String get countersText =>
+      'rx native ${nativeEvents} (keys ${nativeKeyEvents}, status ${statusEvents}) · dart keys ${dartKeyEvents}';
+
+  static String _hhmmss(DateTime t) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  void _setState(ScannerListenState s, [String why = '']) {
+    state = s;
+    reason = why;
+    stateAt = DateTime.now();
+    _notify();
+  }
+
+  void _notify() {
+    if (!_out.isClosed) changes.value = changes.value + 1;
+  }
 
   /// Broadcast stream of scanner status + key events. Silent when no
-  /// DataWedge / no native plugin is present.
+  /// DataWedge / no native plugin is present. Each subscriber (re)starts the
+  /// platform stream if it is not currently alive.
   Stream<ScannerEvent> get events {
     _ensureStarted();
     return _out.stream;
   }
 
   void _ensureStarted() {
-    if (_started) return;
-    _started = true;
-    if (kIsWeb) return;
+    _hookDartKeys();
+    if (state == ScannerListenState.starting || state == ScannerListenState.listening) return;
+    if (state == ScannerListenState.unavailable) return;
+    if (kIsWeb) { _setState(ScannerListenState.unavailable, 'web build has no scanner plugin'); return; }
     try {
-      if (!Platform.isAndroid) return;
-    } catch (_) {
+      if (!Platform.isAndroid) { _setState(ScannerListenState.unavailable, 'not an Android device'); return; }
+    } catch (err) {
+      _setState(ScannerListenState.unavailable, 'platform unknown ($err)');
       return;
     }
+    _startPlatformStream();
+  }
+
+  void _startPlatformStream() {
+    _platformSub?.cancel();
+    _platformSub = null;
+    _ackTimer?.cancel();
     try {
       _platformSub = _channel.receiveBroadcastStream().listen(
-        (raw) {
-          final e = ScannerEvent.fromPlatform(raw);
-          if (e != null && !_out.isClosed) _out.add(e);
-        },
+        _onPlatformEvent,
         // MissingPluginException / PlatformException on a build without the
-        // native side: swallow — the feature just stays off.
-        onError: (Object err) => debugPrint('ScannerStatusService: $err'),
+        // native side: the feature just stays off — but SAY SO.
+        onError: (Object err) {
+          debugPrint('ScannerStatusService: $err');
+          _ackTimer?.cancel();
+          _setState(ScannerListenState.error, '$err');
+        },
+        onDone: () {
+          debugPrint('ScannerStatusService: platform stream closed');
+          _ackTimer?.cancel();
+          if (state != ScannerListenState.error) {
+            _setState(ScannerListenState.closed, 'end of stream from native (will restart on next screen open)');
+          }
+        },
         cancelOnError: true,
       );
+      _setState(ScannerListenState.starting);
+      _ackTimer = Timer(ackWindow, () {
+        if (state == ScannerListenState.starting) _setState(ScannerListenState.noReply);
+      });
     } catch (err) {
       debugPrint('ScannerStatusService: unavailable ($err)');
+      _setState(ScannerListenState.error, 'listen threw: $err');
     }
+  }
+
+  void _onPlatformEvent(dynamic raw) {
+    final e = ScannerEvent.fromPlatform(raw);
+    if (e == null) return;
+    nativeEvents++;
+    if (e.type == 'listening') {
+      _ackTimer?.cancel();
+      _setState(ScannerListenState.listening);
+    } else if (e.isKey) {
+      nativeKeyEvents++;
+      if (e.repeat == 0) lastKey = e;
+    } else if (e.isStatus) {
+      statusEvents++;
+      lastStatus = e;
+    }
+    if (!_out.isClosed) _out.add(e);
+    _notify();
+  }
+
+  // ── Dart key feed (v1.0.77). Flutter's HardwareKeyboard sees every key the
+  // framework receives, INCLUDING keys handed over by the input method through
+  // the text-input connection — those never pass MainActivity.dispatchKeyEvent,
+  // so a keyboard-wedge scanner that talks to the focused text field can be
+  // invisible to the native feed while a field has the cursor. Unmapped Android
+  // key codes arrive as `keyCode | androidPlane`, so key 563 is still 563 here.
+  // Both feeds land in the same stream; the detector is idempotent per pull.
+  void _hookDartKeys() {
+    if (_dartKeysHooked) return;
+    _dartKeysHooked = true;
+    try {
+      HardwareKeyboard.instance.addHandler(_onDartKey);
+    } catch (err) {
+      debugPrint('ScannerStatusService: HardwareKeyboard hook failed ($err)');
+    }
+  }
+
+  bool _onDartKey(KeyEvent k) {
+    try {
+      final id = k.logicalKey.keyId;
+      final code = androidKeyCodeFromKeyId(id);
+      final e = ScannerEvent(
+        type: 'key',
+        keyCode: code >= 0 ? code : id,
+        keyName: code >= 0 ? 'android' : (k.logicalKey.keyLabel.isNotEmpty ? k.logicalKey.keyLabel : 'flutter'),
+        action: k is KeyUpEvent ? 1 : 0,
+        scanCode: androidKeyCodeFromKeyId(k.physicalKey.usbHidUsage),
+        repeat: k is KeyRepeatEvent ? 1 : 0,
+        src: 'dart',
+        keyId: id,
+        at: DateTime.now(),
+      );
+      dartKeyEvents++;
+      if (e.repeat == 0) lastKey = e;
+      if (!_out.isClosed) _out.add(e);
+      _notify();
+    } catch (err) {
+      debugPrint('ScannerStatusService: dart key failed ($err)');
+    }
+    return false;   // never consume — the field still gets the key as before
   }
 
   /// Test seam: push an event as if it came from the platform.
   @visibleForTesting
-  void inject(ScannerEvent e) {
-    _started = true;
-    _out.add(e);
-  }
+  void inject(ScannerEvent e) => _onPlatformEvent({
+        'type': e.type, 'status': e.status, 'profile': e.profile, 'keyCode': e.keyCode,
+        'keyName': e.keyName, 'action': e.action, 'scanCode': e.scanCode, 'repeat': e.repeat,
+        't': e.at.millisecondsSinceEpoch,
+      });
 
   @visibleForTesting
   Future<void> reset() async {
+    _ackTimer?.cancel();
     await _platformSub?.cancel();
     _platformSub = null;
-    _started = false;
+    state = ScannerListenState.idle;
+    reason = '';
+    stateAt = null;
+    nativeEvents = nativeKeyEvents = statusEvents = dartKeyEvents = 0;
+    lastKey = null;
+    lastStatus = null;
   }
 }
 

@@ -108,7 +108,7 @@ data and icon.
 
 ## Mobile App Screens
 
-### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74, trigger-key feed v1.0.75)
+### Receive Parent Roll Screen — shipment batch flow (Joe's rulings 2026-09-25, v1.0.73; no-read skip v1.0.74, trigger-key feed v1.0.75, durable listener state + Dart key feed v1.0.77)
 A shipment is many rolls of one variety: fill the shared info once, scan roll after roll into
 an on-screen LIST, then press ONE Submit — the same pattern as Roll Production. Rolls are NOT
 saved as they are scanned; nothing reaches the server until Submit.
@@ -159,6 +159,20 @@ saved as they are scanned; nothing reaches the server until Submit.
      (a Zebra whose trigger is also a visible key) fires at most once per pull; a real scan
      (characters arrive) never fires.
      Unit tests: `test/no_read_detector_test.dart`. Other screens can opt in the same way.
+     LISTENER STATE + THIRD FEED (v1.0.77, after Joe's test-v1.0.76 report "not listening · no-reads 0"
+     on his non-Zebra scanner): "listening" is no longer a one-shot event that whichever screen
+     subscribed first consumed (the new Scanner Settings screen, or an earlier Receive visit, left
+     Receive saying "not listening" with no reason). `ScannerStatusService` now keeps a DURABLE
+     state (`ScannerListenState`: not started / starting / listening / no reply from native within
+     3 s / unavailable / stream error / stream closed) WITH the reason, counters (native events,
+     native keys, status events, dart keys) and the last key/status from any feed; a dead stream
+     restarts when the next screen subscribes. The TEST diag line and Settings → Scanner Settings
+     print the state text verbatim, so "not listening" always says WHY. Third feed: Flutter's own
+     `HardwareKeyboard` handler (never consumes) — it also sees keys handed over by the input method
+     through the text-input connection, which never reach `MainActivity.dispatchKeyEvent`; unmapped
+     Android codes arrive as `keyCode | androidPlane`, so 563 is still 563 (`androidKeyCodeFromKeyId`).
+     Both key feeds drive the same detector (a second down re-arms, a second up finds nothing armed →
+     still one no-read per pull). Diag "last key … via native|dart" tells which feed saw it.
    - No "scan → Enter → Enter → Enter" hint text; no "Receive Roll" / "Clear roll" buttons.
 3. SUBMIT (one plain button at the bottom, no icon; disabled until the list has a roll):
    POST /rolls/receive/batch {vendor_id, po_number, submit_id, rolls:[{roll_id, material_type,

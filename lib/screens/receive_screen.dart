@@ -165,9 +165,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   late final NoReadDetector _noRead = NoReadDetector(onNoRead: _onNoRead);
   StreamSubscription<ScannerEvent>? _scanSub;
   // Walkthrough diagnostics (TEST builds only): last status / last key seen.
-  String _diagStatus = '';
-  String _diagKey = '';
-  bool _scannerListening = false;
+  // Diagnostics (TEST builds): state, reason, counters and last events all
+  // live in ScannerStatusService (durable across screens — v1.0.77 fix); this
+  // screen just repaints when the service says something changed.
+  void _onScannerChange() { if (mounted && appEnvironment == 'test') setState(() {}); }
 
   static String _newSubmitId() {
     final r = Random();
@@ -194,6 +195,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
     ScannerStatusService.instance.loadTriggerKeyCode();   // configured trigger key (default 563)
     _scanSub = ScannerStatusService.instance.events.listen(_onScannerEvent);
+    ScannerStatusService.instance.changes.addListener(_onScannerChange);
     // Check for duplicate Roll ID when the field loses focus (typed entry).
     // Scan-completed events fire onSubmitted, which is wired separately.
     _rollIdFocusNode.addListener(() {
@@ -210,6 +212,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _persistTimer?.cancel();
     _persistDraftNow();
     _scanSub?.cancel();
+    ScannerStatusService.instance.changes.removeListener(_onScannerChange);
     _noRead.dispose();
     _rollIdController.dispose();
     _poController.dispose();
@@ -475,19 +478,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (!mounted) return;
     if (e.isStatus) {
       _noRead.onStatus(e.status);
-      if (appEnvironment == 'test') setState(() => _diagStatus = e.toString());
     } else if (e.isKey) {
       // Second feed (Joe's ruling 2026-09-25): the scan-trigger KEY. Down
       // arms, up = beam-off; repeats while held are ignored. Same detector as
-      // the DataWedge path → one no-read per pull, never a double-fire.
+      // the DataWedge path → one no-read per pull, never a double-fire. The key
+      // may arrive from the native feed, the Dart feed, or both (v1.0.77):
+      // a second down only re-arms, a second up finds nothing armed.
       if (ScannerStatusService.instance.isTriggerKey(e)) {
         if (e.action == 0 && e.repeat == 0) _noRead.onTriggerDown();
         if (e.action == 1) _noRead.onTriggerUp();
       }
-      if (appEnvironment == 'test' && e.repeat == 0) setState(() => _diagKey = e.toString());
-    } else if (e.type == 'listening') {
-      if (appEnvironment == 'test') setState(() => _scannerListening = true);
     }
+    // 'listening' and the diagnostics are handled by the service itself.
   }
 
   /// A trigger pull that decoded nothing: behave exactly like Enter on the
@@ -515,11 +517,13 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   /// walkthrough on the real TC22 can read what DataWedge delivers.
   Widget _buildScannerDiagnostics() {
     if (appEnvironment != 'test') return const SizedBox.shrink();
-    final txt = 'Scanner diag · ${_scannerListening ? 'listening' : 'not listening'}'
-        ' · trigger key ${ScannerStatusService.instance.triggerKeyCode}'
-        ' · no-reads ${_noRead.noReads}'
-        '${_diagStatus.isEmpty ? '' : ' · last $_diagStatus'}'
-        '${_diagKey.isEmpty ? '' : ' · last $_diagKey'}';
+    final svc = ScannerStatusService.instance;
+    final txt = 'Scanner diag · ${svc.stateText}'
+        ' · trigger key ${svc.triggerKeyCode}'
+        ' · no-reads ${_noRead.noReads}${_noRead.isArmed ? ' (armed)' : ''}'
+        ' · ${svc.countersText}'
+        '${svc.lastStatus == null ? '' : ' · last ${svc.lastStatus}'}'
+        '${svc.lastKey == null ? '' : ' · last ${svc.lastKey}'}';
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Text(txt, key: const Key('scannerDiag'),

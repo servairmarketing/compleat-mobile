@@ -19,9 +19,8 @@ class ScannerSettingsScreen extends StatefulWidget {
 class _ScannerSettingsScreenState extends State<ScannerSettingsScreen> {
   final _codeController = TextEditingController();
   StreamSubscription<ScannerEvent>? _sub;
-  String _lastKey = '—';
-  String _lastStatus = '—';
   int _current = kDefaultTriggerKeyCode;
+  void _onScannerChange() { if (mounted) setState(() {}); }
 
   @override
   void initState() {
@@ -30,15 +29,15 @@ class _ScannerSettingsScreenState extends State<ScannerSettingsScreen> {
       if (!mounted) return;
       setState(() { _current = c; _codeController.text = '$c'; });
     });
-    _sub = ScannerStatusService.instance.events.listen((e) {
-      if (!mounted) return;
-      if (e.isKey && e.repeat == 0) setState(() => _lastKey = e.toString());
-      if (e.isStatus) setState(() => _lastStatus = e.toString());
-    });
+    // Subscribing (re)starts the platform stream if it is not alive; the
+    // service keeps state, counters and last events (v1.0.77) — repaint on change.
+    _sub = ScannerStatusService.instance.events.listen((_) {});
+    ScannerStatusService.instance.changes.addListener(_onScannerChange);
   }
 
   @override
   void dispose() {
+    ScannerStatusService.instance.changes.removeListener(_onScannerChange);
     _sub?.cancel();
     _codeController.dispose();
     super.dispose();
@@ -92,10 +91,17 @@ class _ScannerSettingsScreenState extends State<ScannerSettingsScreen> {
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.black12)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Last key seen: $_lastKey', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                Text('Last key seen: ${ScannerStatusService.instance.lastKey ?? '—'}',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
-                Text('Last scanner status (Zebra DataWedge): $_lastStatus',
+                Text('Last scanner status (Zebra DataWedge): ${ScannerStatusService.instance.lastStatus ?? '—'}',
                     style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 6),
+                Text('Listener: ${ScannerStatusService.instance.stateText}',
+                    key: const Key('scannerListenerState'),
+                    style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                Text(ScannerStatusService.instance.countersText,
+                    style: const TextStyle(fontSize: 12, color: Colors.black45)),
               ]),
             ),
             const SizedBox(height: 18),

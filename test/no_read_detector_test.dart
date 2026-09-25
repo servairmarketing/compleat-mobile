@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:compleat_mobile/services/scanner_status_service.dart';
 
@@ -185,6 +186,40 @@ void main() {
     expect(k.toString(), contains('KEYCODE_BUTTON_L1(103) down'));
     expect(ScannerEvent.fromPlatform('nope'), isNull);
     expect(ScannerEvent.fromPlatform(null), isNull);
+  });
+
+  test('androidKeyCodeFromKeyId: Android-plane ids yield the key code, other planes -1', () {
+    expect(androidKeyCodeFromKeyId(LogicalKeyboardKey.androidPlane | 563), 563);
+    expect(androidKeyCodeFromKeyId(LogicalKeyboardKey.androidPlane | 103), 103);
+    expect(androidKeyCodeFromKeyId(LogicalKeyboardKey.enter.keyId), -1);
+    expect(androidKeyCodeFromKeyId(LogicalKeyboardKey.keyA.keyId), -1);
+  });
+
+  test('a dart-fed trigger key (keyCode 563 via dart) is a trigger key too', () {
+    final svc = ScannerStatusService.instance;
+    final dart563 = ScannerEvent(type: 'key', keyCode: 563, action: 0, src: 'dart',
+        keyId: LogicalKeyboardKey.androidPlane | 563, at: DateTime.now());
+    expect(svc.isTriggerKey(dart563), true);
+    expect(dart563.toString(), contains('via dart'));
+  });
+
+  test('listener state is durable and self-explaining (not Android here)', () async {
+    final svc = ScannerStatusService.instance;
+    await svc.reset();
+    expect(svc.state, ScannerListenState.idle);
+    expect(svc.stateText, contains('not started'));
+    svc.events;                                   // a screen subscribes
+    expect(svc.state, ScannerListenState.unavailable, reason: 'flutter test runs on the host, not Android');
+    expect(svc.stateText, contains('NOT listening'));
+    expect(svc.reason.isNotEmpty, true);
+    final before = svc.changes.value;
+    svc.inject(ScannerEvent(type: 'key', keyCode: 563, action: 0, at: DateTime.now()));
+    expect(svc.nativeEvents, 1);
+    expect(svc.nativeKeyEvents, 1);
+    expect(svc.lastKey?.keyCode, 563);
+    expect(svc.changes.value, greaterThan(before));
+    expect(svc.countersText, contains('keys 1'));
+    await svc.reset();
   });
 
   test('isTriggerKey follows the configured code (default 563)', () {
