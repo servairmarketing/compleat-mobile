@@ -6,6 +6,7 @@
 // Backend assumption: TESTVEND1 vendor seeded; Material Type 'Virgin',
 // Basis Weight '24', Width '69' all present in the test API.
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
