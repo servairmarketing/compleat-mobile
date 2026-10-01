@@ -1,0 +1,165 @@
+name: PEPK export (Play App Signing key)
+# ONE-OFF, MANUAL-ONLY helper for Joe's ruling D2 (Google Play internal
+# distribution, docs/PLAY_INTERNAL_DISTRIBUTION_PLAN_2026-09-28.md §2.2 / §7.2):
+# Play App Signing must sign with OUR existing release key so Play installs
+# upgrade the sideloaded app in place. The keystore passwords exist ONLY as
+# GitHub repo secrets (never stored anywhere else — deliberate), so the
+# export runs here, inside Actions, instead of on a laptop.
+#
+# What it does: rebuild compleat-release.jks from KEYSTORE_BASE64 → download
+# Google's official pepk.jar (URL + SHA-256 pinned below; mismatch = stop)
+# → `java -jar pepk.jar` encrypts the private key + certificate to the
+# encryption key the Play Console shows → upload ONLY the resulting
+# encrypted .zip as a workflow artifact (1-day retention). Nothing else
+# leaves the runner; the keystore is deleted at the end even on failure.
+#
+# What it does NOT do: no build, no test, no GitHub Release, no Play upload —
+# it is safe to dispatch on any branch. It never runs on push.
+#
+# Secret names are EXACTLY the four that build.yml uses for release signing
+# (verified 2026-10-01: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS,
+# KEY_PASSWORD, all set 2026-04-08). GitHub masks secret values in logs;
+# the console encryption key is masked explicitly as well.
+on:
+  workflow_dispatch:
+    inputs:
+      encryption_key:
+        description: >-
+          Encryption key shown by the Play Console on "Export and upload a key
+          from Java keystore" (long hex string). Paste it exactly.
+        required: true
+        type: string
+
+jobs:
+  pepk-export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PEPK_URL: https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar
+      # SHA-256 of pepk.jar as downloaded from PEPK_URL on 2026-10-01
+      # (9,136,653 bytes). If Google ships a new jar the step fails loudly;
+      # re-pin after checking the new hash, never bypass.
+      PEPK_SHA256: "aaccc0774b240aa5304bdad2a49865e92f229ca73209ecb6eaafe75dc858e24e"
+      # `secrets` is not allowed in a step-level `if`; evaluate the presence
+      # check here (same pattern as build.yml HAS_PLAY_SA).
+      HAS_SIGNING_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_ALIAS != '' && secrets.KEY_PASSWORD != '' }}
+    steps:
+      - name: Mask the encryption key and check inputs/secrets
+        env:
+          ENCRYPTION_KEY: ${{ inputs.encryption_key }}
+        run: |
+          echo "::add-mask::$ENCRYPTION_KEY"
+          if [ "$HAS_SIGNING_SECRETS" != "true" ]; then
+            echo "::error::One or more of KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD is not set on this repo. Stopping — nothing was exported."
+            exit 1
+          fi
+          KEY_TRIMMED="$(printf '%s' "$ENCRYPTION_KEY" | tr -d '[:space:]')"
+          # pepk --help: "a 4-byte identity followed by a 64-byte P256 point"
+          # = 68 bytes = exactly 136 hex characters.
+          if ! printf '%s' "$KEY_TRIMMED" | grep -Eq '^[0-9a-fA-F]{136}$'; then
+            echo "::error::encryption_key is not the console's hex string (expected exactly 136 hex characters 0-9/a-f; got ${#KEY_TRIMMED}). Copy it again from the Play Console page — the whole string, nothing else."
+            exit 1
+          fi
+          echo "ENCRYPTION_KEY_HEX=$KEY_TRIMMED" >> "$GITHUB_ENV"
+          echo "Inputs OK: encryption key length ${#KEY_TRIMMED} hex chars; all four signing secrets present."
+
+      - uses: actions/checkout@v3   # only for scripts/pepk_export.py
+      - uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Download Google's pepk.jar and verify its SHA-256 (pinned)
+        run: |
+          curl -sSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/pepk.jar" "$PEPK_URL"
+          ACTUAL="$(sha256sum "$RUNNER_TEMP/pepk.jar" | cut -d' ' -f1)"
+          echo "pepk.jar: $(stat -c %s "$RUNNER_TEMP/pepk.jar") bytes, sha256 $ACTUAL"
+          if [ "$ACTUAL" != "$PEPK_SHA256" ]; then
+            echo "::error::pepk.jar SHA-256 mismatch (expected $PEPK_SHA256). Google may have published a new tool version — stop, verify the new jar, re-pin."
+            exit 1
+          fi
+          echo "pepk.jar checksum OK"
+
+      - name: Rebuild the release keystore from the secret
+        run: |
+          umask 077
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/compleat-release.jks"
+          echo "keystore: $(stat -c %s "$RUNNER_TEMP/compleat-release.jks") bytes (expected 2764 — the Cloud Shell copy dated 2026-04-08)"
+
+      - name: Show the keystore certificate fingerprints (no secrets — compare with Play Console after upload)
+        # Expected SHA1 9B:FE:7E:9A:87:88:79:25:65:E2:BA:31:27:F7:5F:0F:08:89:07:01 — the
+        # certificate that signs the LIVE v1.0.78 APK (read from the APK's
+        # signing block 2026-10-01). Passwords come from the environment
+        # (keytool -storepass:env), never from the command line.
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          keytool -list -v -keystore "$RUNNER_TEMP/compleat-release.jks" \
+            -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" \
+            | grep -E '^\s*(SHA1|SHA256):|Valid from|Signature algorithm name|Subject Public Key Algorithm' \
+            || { echo "::error::keytool could not open the keystore with KEYSTORE_PASSWORD / KEY_ALIAS — check the secrets. Nothing exported."; exit 1; }
+
+      - name: Run the PEPK export
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/pepk-out"
+          OUT="$RUNNER_TEMP/pepk-out/compleat-mobile-signing.zip"
+          # Flags proven in Cloud Shell 2026-10-01 against throwaway PKCS12 and
+          # JKS keystores with this exact jar: `--encryptionkey=<hex>` is the
+          # console-string mode (the RSA-AES mode needs a PEM file instead).
+          # Passwords: pepk prompts through java.io.Console (null on a CI
+          # runner) and its only alternative is password FLAGS, which would
+          # expose the secrets to every process on the runner via the
+          # argument list. scripts/pepk_export.py avoids both: it runs pepk
+          # in a pseudo-terminal, answers the two prompts from environment
+          # variables, and redacts the values from the captured output.
+          pepk() {
+            PEPK_STORE_PASSWORD="$STORE_PASSWORD" PEPK_KEY_PASSWORD="$1" \
+            python3 scripts/pepk_export.py --jar "$RUNNER_TEMP/pepk.jar" -- \
+              --keystore="$RUNNER_TEMP/compleat-release.jks" \
+              --alias="$KEY_ALIAS" \
+              --output="$OUT" \
+              --encryptionkey="$ENCRYPTION_KEY_HEX" \
+              --include-cert
+          }
+          pepk "$KEY_PASSWORD"; rc=$?
+          if [ $rc -ne 0 ] || [ ! -s "$OUT" ]; then
+            # PKCS12 keystores (keytool's default since Java 9) cannot hold a
+            # key password different from the store password — keytool
+            # silently ignores a separate -keypass at creation. If the
+            # KEY_PASSWORD secret was recorded as a different value, the real
+            # key password is the store password. Retry once with it.
+            echo "::notice::Export with KEY_PASSWORD failed (exit $rc); retrying once with the keystore password as the key password (PKCS12 rule)."
+            rm -f "$OUT"
+            pepk "$STORE_PASSWORD"; rc=$?
+            [ $rc -eq 0 ] && echo "::notice::Export succeeded with the keystore password as the key password — the KEY_PASSWORD secret is not the real key password (tell Joe; Gradle still builds because PKCS12 ignores it)."
+          fi
+          set -e
+          if [ $rc -ne 0 ] || [ ! -s "$OUT" ]; then
+            echo "::error::pepk export failed (exit $rc) — see the output above ('keystore password was incorrect' / 'Cannot recover key' = a password secret is wrong; 'No key for alias' = KEY_ALIAS is wrong). Nothing was uploaded."
+            exit 1
+          fi
+          ls -l "$RUNNER_TEMP/pepk-out/"
+          echo "Expected contents: encryptedPrivateKey + certificate.pem"
+          unzip -l "$OUT"
+
+      - name: Upload ONLY the encrypted export zip (1-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: compleat-mobile-pepk-export
+          path: ${{ runner.temp }}/pepk-out/compleat-mobile-signing.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Clean up the keystore and tool
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/compleat-release.jks" "$RUNNER_TEMP/pepk.jar"
+          rm -rf "$RUNNER_TEMP/pepk-out"
+          echo "runner temp cleaned"

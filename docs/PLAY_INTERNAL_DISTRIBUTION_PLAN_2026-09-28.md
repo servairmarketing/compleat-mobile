@@ -602,3 +602,76 @@ Then paste `https://project-f05aa3b5-e37d-4c19-a03.web.app/privacy.html`
 into Play Console → **Grow users → Store presence → Store listing (or App
 content → Privacy policy)** → Save. Not required while the app is only on
 internal testing; required before closed testing / production.
+
+### 7.5 D2 revised (Joe, 2026-10-01): PEPK export runs INSIDE GitHub Actions — `.github/workflows/pepk-export.yml`
+
+Why: the keystore passwords exist only as GitHub repo secrets (deliberate —
+never stored anywhere else; the Cloud Shell copy of `compleat-release.jks`
+exists but nothing on this machine can open it). So §7.2's laptop commands
+are replaced by a manual-only workflow.
+
+Facts established 2026-10-01 (all VERIFIED in this session):
+- Secret names reused EXACTLY from `build.yml`: `KEYSTORE_BASE64`,
+  `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (all four exist, set
+  2026-04-08; `gh secret list`). The alias IS a secret → no guessing needed.
+- LIVE signing certificate (read from the v1.0.78 APK's signing block, no
+  password needed): SHA-1 `9B:FE:7E:9A:87:88:79:25:65:E2:BA:31:27:F7:5F:0F:08:89:07:01`,
+  SHA-256 `B3FD33EB…C43382`, subject `CN=Compleat IMS, OU=IT, O=Servair
+  Filters, L=Orangeville, ST=Ontario, C=CA`, RSA 2048, valid 2026-04-08 →
+  2053-08-24. The Play Console must show this SHA-1 after the upload.
+- Google's tool: `https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar`,
+  9,136,653 bytes, SHA-256
+  `aaccc0774b240aa5304bdad2a49865e92f229ca73209ecb6eaafe75dc858e24e`
+  (downloaded + verified in Cloud Shell; the workflow pins this hash and
+  stops on a mismatch). Its `--help`: hex-string mode is
+  `--encryptionkey=<hex>` ("4-byte identity + 64-byte P256 point" = exactly
+  136 hex chars; the workflow validates that); the `--rsa-aes-encryption`
+  mode needs a PEM file instead and is not used.
+- pepk reads passwords via `java.io.Console` — null on a CI runner, so a
+  stdin pipe crashes (NullPointerException, proven). Password FLAGS would
+  put the secrets in the runner's process argument list, so the workflow
+  uses `scripts/pepk_export.py`: runs pepk in a pseudo-terminal, answers
+  the prompts `Enter password for store '…':` then `Enter password for key
+  '…':` from env vars, redacts the values from the captured output, refuses
+  password flags. Proven against throwaway PKCS12 (same pw) and JKS
+  (different pws) keystores: zip = `encryptedPrivateKey` + `certificate.pem`;
+  wrong password → `Cannot recover key`, exit 1, no zip; wrong alias → `No
+  key for alias`, exit 1; no password string in any log.
+- PKCS12 rule: keytool ignores a separate `-keypass` on PKCS12 keystores, so
+  if `KEY_PASSWORD` ≠ the real key password the workflow retries ONCE with
+  the keystore password and says so in a `::notice::`.
+
+Workflow safety: `on: workflow_dispatch` ONLY; one input `encryption_key`
+(masked); `permissions: contents: read`; no Flutter, no build, no test, no
+GitHub Release, no Play upload — dispatching it on `feat/play-internal-distribution`
+cannot touch LIVE, TEST or Play. Output: artifact
+`compleat-mobile-pepk-export` containing only `compleat-mobile-signing.zip`
+(encrypted to Google's key), 1-day retention; keystore + jar deleted from
+the runner in an `always()` step.
+
+**Joe's dispatch steps (one at a time):**
+1. Play Console → Com-Pleat IMS → Test and release → Internal testing →
+   **Create new release** → in the app-signing choice pick **Use a different
+   key → Export and upload a key from Java keystore** (older wording: Setup →
+   App signing → same option). Leave this page open; copy the
+   **encryption key** hex string it shows (do NOT download pepk.jar there —
+   the workflow fetches and checksums it).
+2. GitHub → compleat-mobile → **Actions** → left list **"PEPK export (Play
+   App Signing key)"** → **Run workflow** → Branch
+   `feat/play-internal-distribution` → paste the hex string into
+   `encryption_key` → **Run workflow**.
+3. Open the run. Expected: every step green; step "Show the keystore
+   certificate fingerprints" prints `SHA1: 9B:FE:7E:9A:…:07:01`; the export
+   step ends with `encryptedPrivateKey` + `certificate.pem` listed; artifact
+   `compleat-mobile-pepk-export` at the bottom. If the fingerprint step is
+   red → `KEYSTORE_PASSWORD`/`KEY_ALIAS` wrong; if the export step says
+   `Cannot recover key` after the retry → `KEY_PASSWORD` wrong; if the
+   checksum step is red → Google changed pepk.jar, send me the run link.
+4. Download the artifact, unzip it once → `compleat-mobile-signing.zip`;
+   upload THAT zip on the console page from step 1.
+5. The console shows the **App signing key certificate** — its SHA-1 must be
+   `9B:FE:7E:9A:87:88:79:25:65:E2:BA:31:27:F7:5F:0F:08:89:07:01`. Equal →
+   continue the release (the AAB from the `compleat-mobile-aab` artifact,
+   §7.3 step 2). Different → stop, send me a screenshot; do not roll out.
+6. Delete the downloaded zip from your machine. The artifact expires after
+   one day; the workflow can be re-run any time.
