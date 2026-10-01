@@ -2,6 +2,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'api_service.dart' show appEnvironment;
 
@@ -11,58 +12,83 @@ class UpdateService {
   static const String _githubApiBase = 'https://api.github.com';
 
   // Release channels (two independent walls between them):
-  // - prod: /releases/latest, tags vX.Y.Z. GitHub's "latest" endpoint NEVER
-  //   returns pre-releases, and prod tags never carry the test- prefix, so
-  //   the live app cannot see test builds.
-  // - test (APP_ENV=test, qa flavor): newest release tagged test-vX.Y.Z
-  //   from the release LIST (pre-releases included there). The test app
-  //   only ever matches the test- prefix, so it cannot see live releases.
+  // - prod (LIVE): GOOGLE PLAY internal testing (Joe's rulings 2026-10-01,
+  //   docs/PLAY_INTERNAL_DISTRIBUTION_PLAN_2026-09-28.md D1/D4). The prod
+  //   app NEVER contacts GitHub and NEVER downloads or installs an APK —
+  //   Play's Device and Network Abuse policy forbids an app distributed via
+  //   Google Play from updating itself by any other mechanism. "Check for
+  //   Update" on prod opens the app's Play Store page (openPlayStore);
+  //   the store shows "Update" when a newer version is on the track.
+  // - test (APP_ENV=test, qa flavor): unchanged — newest release tagged
+  //   test-vX.Y.Z from the GitHub release LIST (pre-releases included
+  //   there), downloaded and installed in-app. The test app only ever
+  //   matches the test- prefix, so it cannot see live releases.
   static const String _testTagPrefix = 'test-v';
 
+  /// Play Store listing of the prod app (applicationId from
+  /// android/app/build.gradle.kts; the qa flavor's `.test` suffix is NOT
+  /// on Play). `market://` opens the Play Store app directly; the https
+  /// form is the fallback for a device without the store app.
+  static const String playPackageName = 'com.compleat.compleat_mobile';
+  static final Uri playStoreMarketUri =
+      Uri.parse('market://details?id=$playPackageName');
+  static final Uri playStoreWebUri =
+      Uri.parse('https://play.google.com/store/apps/details?id=$playPackageName');
+
+  /// True when this build updates itself from the GitHub test channel
+  /// (qa flavor). False = prod = Google Play.
+  static bool get usesGitHubTestChannel => appEnvironment == 'test';
+
+  /// Prod flavor: open the Play Store page. Returns false if neither the
+  /// store app nor a browser could be opened.
+  static Future<bool> openPlayStore() async {
+    try {
+      if (await launchUrl(playStoreMarketUri,
+          mode: LaunchMode.externalApplication)) {
+        return true;
+      }
+    } catch (e) {
+      print('DEBUG openPlayStore market:// failed: $e');
+    }
+    try {
+      return await launchUrl(playStoreWebUri,
+          mode: LaunchMode.externalApplication);
+    } catch (e) {
+      print('DEBUG openPlayStore https failed: $e');
+      return false;
+    }
+  }
+
+  /// TEST channel only. On the prod flavor this returns null WITHOUT any
+  /// network call (Play owns prod updates — see the channel note above).
   static Future<Map<String, dynamic>?> checkForUpdate() async {
+    if (!usesGitHubTestChannel) return null;
     try {
       final dio = Dio();
-      final bool testChannel = appEnvironment == 'test';
       String? latestVersion;
       List? assets;
 
-      if (testChannel) {
-        final response = await dio.get(
-          '$_githubApiBase/repos/$_repoOwner/$_repoName/releases?per_page=30',
-          options:
-              Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
-        );
-        print('DEBUG GitHub API status (test channel): ${response.statusCode}');
-        if (response.statusCode != 200) return null;
-        // The release list is NOT reliably newest-first (observed live:
-        // v1.0.66 listed above test-v1.0.68), so scan every test-v tag and
-        // keep the highest version instead of breaking on the first match.
-        for (final rel in (response.data as List)) {
-          final tag = rel['tag_name'] as String? ?? '';
-          if (tag.startsWith(_testTagPrefix)) {
-            final v = tag.substring(_testTagPrefix.length);
-            if (latestVersion == null || _isNewer(v, latestVersion)) {
-              latestVersion = v;
-              assets = rel['assets'] as List;
-            }
+      final response = await dio.get(
+        '$_githubApiBase/repos/$_repoOwner/$_repoName/releases?per_page=30',
+        options:
+            Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
+      );
+      print('DEBUG GitHub API status (test channel): ${response.statusCode}');
+      if (response.statusCode != 200) return null;
+      // The release list is NOT reliably newest-first (observed live:
+      // v1.0.66 listed above test-v1.0.68), so scan every test-v tag and
+      // keep the highest version instead of breaking on the first match.
+      for (final rel in (response.data as List)) {
+        final tag = rel['tag_name'] as String? ?? '';
+        if (tag.startsWith(_testTagPrefix)) {
+          final v = tag.substring(_testTagPrefix.length);
+          if (latestVersion == null || _isNewer(v, latestVersion)) {
+            latestVersion = v;
+            assets = rel['assets'] as List;
           }
         }
-        if (latestVersion == null) return null;
-      } else {
-        final response = await dio.get(
-          '$_githubApiBase/repos/$_repoOwner/$_repoName/releases/latest',
-          options:
-              Options(headers: {'Accept': 'application/vnd.github.v3+json'}),
-        );
-        print('DEBUG GitHub API status: ${response.statusCode}');
-        print('DEBUG tag_name: ${response.data['tag_name']}');
-        if (response.statusCode != 200) return null;
-        final data = response.data;
-        final tag = data['tag_name'] as String;
-        if (tag.startsWith(_testTagPrefix)) return null; // belt-and-braces
-        latestVersion = tag.replaceAll('v', '');
-        assets = data['assets'] as List;
       }
+      if (latestVersion == null) return null;
 
       final info = await PackageInfo.fromPlatform();
       // qa flavor appends versionNameSuffix "-test" (e.g. "1.0.67-test");

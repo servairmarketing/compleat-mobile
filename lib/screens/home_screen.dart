@@ -28,6 +28,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadProfile();
   }
 
+  /// Prod flavor (LIVE = Google Play, Joe's ruling D4 2026-10-01): never
+  /// download an APK — open the Play Store page instead; the store shows
+  /// "Update" when the internal track has a newer version. The qa flavor
+  /// keeps the GitHub test-channel download/install flow below.
+  Future<void> _openPlayStore() async {
+    final ok = await UpdateService.openPlayStore();
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open the Play Store on this device.'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   Future<void> _checkForUpdate() async {
     final update = await UpdateService.checkForUpdate();
     print('DEBUG update result: $update');
@@ -244,14 +259,22 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(16),
               child: SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _downloading ? null : _checkForUpdate,
-                  icon: _downloading
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.system_update),
-                  label: Text(_downloading ? 'Downloading...' : 'Check for Update'),
-                ),
+                child: UpdateService.usesGitHubTestChannel
+                  ? OutlinedButton.icon(
+                      key: const Key('checkForUpdateButton'),
+                      onPressed: _downloading ? null : _checkForUpdate,
+                      icon: _downloading
+                        ? const SizedBox(width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.system_update),
+                      label: Text(_downloading ? 'Downloading...' : 'Check for Update'),
+                    )
+                  : OutlinedButton.icon(
+                      key: const Key('openPlayStoreButton'),
+                      onPressed: _openPlayStore,
+                      icon: const Icon(Icons.shop),
+                      label: const Text('Check for Update (Play Store)'),
+                    ),
               ),
             ),
           ],

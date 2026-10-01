@@ -24,12 +24,14 @@ building (see `.github/workflows/build.yml`).
 
 | Variant | API_BASE flag | Backend hit | Workflow output |
 |---|---|---|---|
-| prod (default) | _none_ | https://compleat-inventory-api-793462624071.northamerica-northeast2.run.app | `app-release.apk` (published as a GitHub Release) |
-| test | `--dart-define=API_BASE=<test_url> --dart-define=APP_ENV=test` | https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app | `app-test-release.apk` (workflow artifact, not released) |
+| prod (default) | _none_ | https://compleat-inventory-api-793462624071.northamerica-northeast2.run.app | `app-prod-release.aab` → **Google Play internal testing** (artifact `compleat-mobile-aab`; Play upload runs only when the repo secret `PLAY_SERVICE_ACCOUNT_JSON` exists) + `app-prod-release.apk` as a GitHub Release (emergency sideload fallback, same signing key) |
+| test | `--dart-define=API_BASE=<test_url> --dart-define=APP_ENV=test` | https://compleat-inventory-api-477414435007.northamerica-northeast2.run.app | `app-test-release.apk` (GitHub pre-release `test-vX.Y.Z`; the test app self-updates from it) |
 
-Both variants are built on every push to `main` and on manual
-`workflow_dispatch`. Pull the test APK from the workflow run page under
-**Artifacts → app-test-release.apk**.
+The test variant is built on every push to `main`; the prod variant only on
+manual `workflow_dispatch` (Joe's promotion act). The prod app never downloads
+APKs — its "Check for Update" opens the Play Store page (Play policy; see
+`docs/PLAY_INTERNAL_DISTRIBUTION_PLAN_2026-09-28.md`). Every Play upload needs
+a higher `+N` build number in `pubspec.yaml`.
 
 ### Identifying the test APK on a device
 

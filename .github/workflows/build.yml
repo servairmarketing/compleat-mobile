@@ -8,10 +8,28 @@ jobs:
     # LIVE (prod) channel — PROMOTION ONLY (Joe's release model, 2026-07-04):
     # test runs ahead of live; live gets a release only as a deliberate act.
     # Manual trigger only — a push to main must NEVER publish to live users.
+    #
+    # GOOGLE PLAY (Joe's rulings 2026-10-01, docs/PLAY_INTERNAL_DISTRIBUTION_PLAN_2026-09-28.md
+    # D1–D7): the LIVE channel is Google Play INTERNAL TESTING. This job
+    # builds a signed Android App Bundle (AAB, Play's required format),
+    # always uploads it as the workflow artifact `compleat-mobile-aab`, and —
+    # ONLY when the repo secret PLAY_SERVICE_ACCOUNT_JSON exists — pushes it
+    # to the Play `internal` track. Until the secret is added the Play step
+    # is skipped (not failed), so this workflow is safe to run before the
+    # console work is finished; the AAB artifact is what Joe uploads by hand
+    # for the one-time first release (Play's API cannot create it).
+    # D3: the GitHub Release + APK is KEPT as the emergency sideload fallback
+    # (same signing key as Play → installs over a Play install); retire it
+    # after two clean Play releases.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # `secrets` is not allowed in a step-level `if`, so the presence check
+      # is evaluated here (same pattern as compleat-sales HAS_KEYSTORE).
+      HAS_PLAY_SA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      PLAY_PACKAGE_NAME: com.compleat.compleat_mobile
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-java@v3
@@ -44,7 +62,57 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/compleat-release.jks
       - run: flutter pub get
-      - name: Build signed APK
+      - name: Run unit tests
+        # Parity with the TEST job: a red test must never reach Play or the
+        # GitHub Release.
+        run: flutter test --reporter expanded
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          BUILD_NUMBER=$(grep '^version:' pubspec.yaml | sed 's/.*+//')
+          echo "Version: $VERSION  versionCode: $BUILD_NUMBER"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+      - name: Build signed App Bundle (AAB) for Google Play
+        # versionCode = the pubspec `+N`; Play requires it to INCREASE on every
+        # upload — a forgotten bump fails the Play step with "version code
+        # already used" and nothing reaches devices.
+        run: |
+          flutter build appbundle --release --flavor prod \
+            --dart-define=KEYSTORE_PATH=compleat-release.jks
+          ls -l build/app/outputs/bundle/prodRelease/
+        env:
+          STORE_FILE: compleat-release.jks
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compleat-mobile-aab
+          path: build/app/outputs/bundle/prodRelease/app-prod-release.aab
+          if-no-files-found: error
+      - name: Upload to Google Play (internal testing track)
+        # Skipped (not failed) until the repo secret PLAY_SERVICE_ACCOUNT_JSON
+        # exists — plan §3 steps F–I. Service account: play-publisher@…
+        # (LIVE project), invited into the Play Console with "Release to
+        # testing tracks" on Com-Pleat IMS only. Pinned to the newest v1.x
+        # tag of r0adkll/upload-google-play (v1.1.5, 2026-04-21).
+        if: env.HAS_PLAY_SA == 'true'
+        uses: r0adkll/upload-google-play@v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PLAY_PACKAGE_NAME }}
+          releaseFiles: build/app/outputs/bundle/prodRelease/app-prod-release.aab
+          track: internal
+          status: completed
+          releaseName: ${{ steps.version.outputs.build_number }} (${{ steps.version.outputs.version }})
+      - name: Play upload skipped (no PLAY_SERVICE_ACCOUNT_JSON secret yet)
+        if: env.HAS_PLAY_SA != 'true'
+        run: |
+          echo "::notice::PLAY_SERVICE_ACCOUNT_JSON is not set — the AAB was NOT uploaded to Google Play." \
+               "Download the compleat-mobile-aab artifact and upload it in the Play Console (plan §3 step E)."
+      - name: Build signed APK (GitHub Release fallback, D3)
         run: |
           flutter build apk --release --flavor prod \
             --dart-define=KEYSTORE_PATH=compleat-release.jks
@@ -53,11 +121,11 @@ jobs:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      - name: Get version and create release
+      - name: Create GitHub release (fallback sideload APK)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
           echo "Version: $VERSION"
           gh release delete "v$VERSION" --yes 2>/dev/null || true
           gh release create "v$VERSION" \

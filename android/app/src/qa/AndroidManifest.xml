@@ -1,0 +1,22 @@
+<!-- qa (TEST) flavor manifest — merged on top of src/main/AndroidManifest.xml.
+
+     The TEST app still updates itself from the GitHub `test-v*` pre-release
+     channel (download the APK in-app, then hand it to the package installer),
+     so it alone declares the self-install permission and the FileProvider
+     that exposes the downloaded APK. The prod flavor is distributed through
+     Google Play and carries neither (Joe's ruling D4, 2026-10-01;
+     docs/PLAY_INTERNAL_DISTRIBUTION_PLAN_2026-09-28.md §2.5). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <application>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
+    </application>
+</manifest>
