@@ -625,8 +625,25 @@ Facts established 2026-10-01 (all VERIFIED in this session):
   (downloaded + verified in Cloud Shell; the workflow pins this hash and
   stops on a mismatch). Its `--help`: hex-string mode is
   `--encryptionkey=<hex>` ("4-byte identity + 64-byte P256 point" = exactly
-  136 hex chars; the workflow validates that); the `--rsa-aes-encryption`
-  mode needs a PEM file instead and is not used.
+  136 hex chars); PEM mode is `--rsa-aes-encryption
+  --encryption-key-path=<pem>`.
+- **2026-10-02 revision — the console gives a PEM, not a hex string.** Joe's
+  Play Console "Export and upload a key from Java keystore" page shows no hex
+  key; it offers **Download encryption public key** (`encryption_public_key.pem`)
+  and its sample command is `--rsa-aes-encryption
+  --encryption-key-path=/path/to/encryption_public_key.pem`. The workflow
+  input is therefore `encryption_public_key`: Joe pastes the .pem file's
+  CONTENTS into the Run-workflow box. `scripts/pepk_encryption_key.py`
+  repairs the paste (GitHub's box is single-line, so browsers drop the line
+  breaks or turn them into spaces — all three forms, and bare base64, rebuild
+  the identical PEM; proven locally), refuses a private key, checks the
+  result with `openssl pkey -pubin`, and sets `PEPK_KEY_MODE=pem`. The
+  legacy 136-hex string is still accepted (`PEPK_KEY_MODE=hex`, masked as
+  before). The encryption key is PUBLIC — nothing about it is secret. PEM
+  mode proven in Cloud Shell 2026-10-02 against a throwaway JKS keystore and
+  a throwaway RSA-4096 public key with the pinned jar: exit 0, zip =
+  `encryptedPrivateKey` + `certificate.pem` (same two files as hex mode);
+  wrong key password → exit 1, no zip.
 - pepk reads passwords via `java.io.Console` — null on a CI runner, so a
   stdin pipe crashes (NullPointerException, proven). Password FLAGS would
   put the secrets in the runner's process argument list, so the workflow
@@ -641,8 +658,9 @@ Facts established 2026-10-01 (all VERIFIED in this session):
   if `KEY_PASSWORD` ≠ the real key password the workflow retries ONCE with
   the keystore password and says so in a `::notice::`.
 
-Workflow safety: `on: workflow_dispatch` ONLY; one input `encryption_key`
-(masked); `permissions: contents: read`; no Flutter, no build, no test, no
+Workflow safety: `on: workflow_dispatch` ONLY; one input
+`encryption_public_key` (a public key; the legacy hex form is masked);
+`permissions: contents: read`; no Flutter, no build, no test, no
 GitHub Release, no Play upload — dispatching it on `feat/play-internal-distribution`
 cannot touch LIVE, TEST or Play. Output: artifact
 `compleat-mobile-pepk-export` containing only `compleat-mobile-signing.zip`
@@ -653,25 +671,33 @@ the runner in an `always()` step.
 1. Play Console → Com-Pleat IMS → Test and release → Internal testing →
    **Create new release** → in the app-signing choice pick **Use a different
    key → Export and upload a key from Java keystore** (older wording: Setup →
-   App signing → same option). Leave this page open; copy the
-   **encryption key** hex string it shows (do NOT download pepk.jar there —
-   the workflow fetches and checksums it).
-2. GitHub → compleat-mobile → **Actions** → left list **"PEPK export (Play
-   App Signing key)"** → **Run workflow** → Branch
-   `feat/play-internal-distribution` → paste the hex string into
-   `encryption_key` → **Run workflow**.
-3. Open the run. Expected: every step green; step "Show the keystore
+   App signing → same option). Leave this page open; click **Download
+   encryption public key** → a file `encryption_public_key.pem` lands in
+   Downloads (do NOT download pepk.jar there — the workflow fetches and
+   checksums it).
+2. Open `encryption_public_key.pem` in Notepad (Windows: right-click → Open
+   with → Notepad) or TextEdit (Mac) → Edit → Select All → Copy. It starts
+   with `-----BEGIN PUBLIC KEY-----`.
+3. GitHub → compleat-mobile → **Actions** → left list **"PEPK export (Play
+   App Signing key)"** → **Run workflow** → Branch `main` → paste into the
+   `encryption_public_key` box (it becomes one long line — that is fine) →
+   **Run workflow**.
+4. Open the run. Expected: every step green; step "Check the secrets and
+   the pasted encryption public key" prints `Encryption key: PEM 'PUBLIC
+   KEY' … -> pepk --rsa-aes-encryption` (if it is red, the paste was
+   incomplete — redo step 2); step "Show the keystore
    certificate fingerprints" prints `SHA1: 9B:FE:7E:9A:…:07:01`; the export
    step ends with `encryptedPrivateKey` + `certificate.pem` listed; artifact
    `compleat-mobile-pepk-export` at the bottom. If the fingerprint step is
    red → `KEYSTORE_PASSWORD`/`KEY_ALIAS` wrong; if the export step says
    `Cannot recover key` after the retry → `KEY_PASSWORD` wrong; if the
    checksum step is red → Google changed pepk.jar, send me the run link.
-4. Download the artifact, unzip it once → `compleat-mobile-signing.zip`;
+5. Download the artifact, unzip it once → `compleat-mobile-signing.zip`;
    upload THAT zip on the console page from step 1.
-5. The console shows the **App signing key certificate** — its SHA-1 must be
+6. The console shows the **App signing key certificate** — its SHA-1 must be
    `9B:FE:7E:9A:87:88:79:25:65:E2:BA:31:27:F7:5F:0F:08:89:07:01`. Equal →
    continue the release (the AAB from the `compleat-mobile-aab` artifact,
    §7.3 step 2). Different → stop, send me a screenshot; do not roll out.
-6. Delete the downloaded zip from your machine. The artifact expires after
-   one day; the workflow can be re-run any time.
+7. Delete the downloaded zip from your machine (the .pem can stay — it is
+   public). The artifact expires after one day; the workflow can be re-run
+   any time.

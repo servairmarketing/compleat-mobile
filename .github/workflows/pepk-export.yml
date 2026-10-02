@@ -9,24 +9,35 @@ name: PEPK export (Play App Signing key)
 # What it does: rebuild compleat-release.jks from KEYSTORE_BASE64 → download
 # Google's official pepk.jar (URL + SHA-256 pinned below; mismatch = stop)
 # → `java -jar pepk.jar` encrypts the private key + certificate to the
-# encryption key the Play Console shows → upload ONLY the resulting
-# encrypted .zip as a workflow artifact (1-day retention). Nothing else
-# leaves the runner; the keystore is deleted at the end even on failure.
+# encryption PUBLIC key the Play Console hands out → upload ONLY the
+# resulting encrypted .zip as a workflow artifact (1-day retention). Nothing
+# else leaves the runner; the keystore is deleted at the end even on failure.
 #
 # What it does NOT do: no build, no test, no GitHub Release, no Play upload —
 # it is safe to dispatch on any branch. It never runs on push.
 #
 # Secret names are EXACTLY the four that build.yml uses for release signing
 # (verified 2026-10-01: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS,
-# KEY_PASSWORD, all set 2026-04-08). GitHub masks secret values in logs;
-# the console encryption key is masked explicitly as well.
+# KEY_PASSWORD, all set 2026-04-08). GitHub masks secret values in logs.
+#
+# Input (2026-10-02 revision): the console's "Export and upload a key from
+# Java keystore" page no longer shows a hex string — it offers "Download
+# encryption public key" (encryption_public_key.pem) and its sample command
+# is `--rsa-aes-encryption --encryption-key-path=…pem`. Joe pastes the .pem
+# file's CONTENTS into the single input box; scripts/pepk_encryption_key.py
+# repairs the line breaks the paste loses, checks it with openssl and picks
+# the pepk mode. The older 136-hex string is still accepted (masked, as
+# before). The key is public — nothing about it is secret.
 on:
   workflow_dispatch:
     inputs:
-      encryption_key:
+      encryption_public_key:
         description: >-
-          Encryption key shown by the Play Console on "Export and upload a key
-          from Java keystore" (long hex string). Paste it exactly.
+          Paste the CONTENTS of encryption_public_key.pem — the file the Play
+          Console gave you via "Download encryption public key" on the
+          "Export and upload a key from Java keystore" page. Open the .pem in
+          Notepad/TextEdit, Select All, Copy, paste here. Lost line breaks are
+          fine. (The console's older 136-character hex key is also accepted.)
         required: true
         type: string
 
@@ -45,26 +56,23 @@ jobs:
       # check here (same pattern as build.yml HAS_PLAY_SA).
       HAS_SIGNING_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_ALIAS != '' && secrets.KEY_PASSWORD != '' }}
     steps:
-      - name: Mask the encryption key and check inputs/secrets
+      - uses: actions/checkout@v3   # only for scripts/pepk_encryption_key.py + scripts/pepk_export.py
+
+      - name: Check the secrets and the pasted encryption public key
         env:
-          ENCRYPTION_KEY: ${{ inputs.encryption_key }}
+          PEPK_PASTED_KEY: ${{ inputs.encryption_public_key }}
         run: |
-          echo "::add-mask::$ENCRYPTION_KEY"
           if [ "$HAS_SIGNING_SECRETS" != "true" ]; then
             echo "::error::One or more of KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD is not set on this repo. Stopping — nothing was exported."
             exit 1
           fi
-          KEY_TRIMMED="$(printf '%s' "$ENCRYPTION_KEY" | tr -d '[:space:]')"
-          # pepk --help: "a 4-byte identity followed by a 64-byte P256 point"
-          # = 68 bytes = exactly 136 hex characters.
-          if ! printf '%s' "$KEY_TRIMMED" | grep -Eq '^[0-9a-fA-F]{136}$'; then
-            echo "::error::encryption_key is not the console's hex string (expected exactly 136 hex characters 0-9/a-f; got ${#KEY_TRIMMED}). Copy it again from the Play Console page — the whole string, nothing else."
-            exit 1
-          fi
-          echo "ENCRYPTION_KEY_HEX=$KEY_TRIMMED" >> "$GITHUB_ENV"
-          echo "Inputs OK: encryption key length ${#KEY_TRIMMED} hex chars; all four signing secrets present."
+          umask 077
+          # Writes $RUNNER_TEMP/encryption_public_key.pem (re-wrapped, openssl-checked)
+          # and sets PEPK_KEY_MODE=pem + PEPK_KEY_PEM — or, for the legacy hex
+          # string, masks it and sets PEPK_KEY_MODE=hex + ENCRYPTION_KEY_HEX.
+          python3 scripts/pepk_encryption_key.py "$RUNNER_TEMP/encryption_public_key.pem"
+          echo "All four signing secrets present."
 
-      - uses: actions/checkout@v3   # only for scripts/pepk_export.py
       - uses: actions/setup-java@v3
         with:
           java-version: '17'
@@ -110,9 +118,21 @@ jobs:
           set +e
           mkdir -p "$RUNNER_TEMP/pepk-out"
           OUT="$RUNNER_TEMP/pepk-out/compleat-mobile-signing.zip"
-          # Flags proven in Cloud Shell 2026-10-01 against throwaway PKCS12 and
-          # JKS keystores with this exact jar: `--encryptionkey=<hex>` is the
-          # console-string mode (the RSA-AES mode needs a PEM file instead).
+          # Two pepk modes, both proven in Cloud Shell against throwaway
+          # keystores with this exact jar (hex 2026-10-01, PEM 2026-10-02):
+          #   pem → `--rsa-aes-encryption --encryption-key-path=<pem>` (the
+          #         console's current sample command)
+          #   hex → `--encryptionkey=<hex>` (legacy console string)
+          # Either way the zip = encryptedPrivateKey + certificate.pem.
+          if [ "$PEPK_KEY_MODE" = "pem" ]; then
+            KEY_FLAGS=(--rsa-aes-encryption "--encryption-key-path=$PEPK_KEY_PEM")
+          elif [ "$PEPK_KEY_MODE" = "hex" ]; then
+            KEY_FLAGS=("--encryptionkey=$ENCRYPTION_KEY_HEX")
+          else
+            echo "::error::internal: PEPK_KEY_MODE is '$PEPK_KEY_MODE' — the input check step did not run. Nothing exported."
+            exit 1
+          fi
+          echo "pepk mode: $PEPK_KEY_MODE"
           # Passwords: pepk prompts through java.io.Console (null on a CI
           # runner) and its only alternative is password FLAGS, which would
           # expose the secrets to every process on the runner via the
@@ -125,7 +145,7 @@ jobs:
               --keystore="$RUNNER_TEMP/compleat-release.jks" \
               --alias="$KEY_ALIAS" \
               --output="$OUT" \
-              --encryptionkey="$ENCRYPTION_KEY_HEX" \
+              "${KEY_FLAGS[@]}" \
               --include-cert
           }
           pepk "$KEY_PASSWORD"; rc=$?
@@ -160,6 +180,6 @@ jobs:
       - name: Clean up the keystore and tool
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP/compleat-release.jks" "$RUNNER_TEMP/pepk.jar"
+          rm -f "$RUNNER_TEMP/compleat-release.jks" "$RUNNER_TEMP/pepk.jar" "$RUNNER_TEMP/encryption_public_key.pem"
           rm -rf "$RUNNER_TEMP/pepk-out"
           echo "runner temp cleaned"

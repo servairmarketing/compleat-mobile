@@ -17,7 +17,10 @@ Usage (all pepk flags except the password ones are passed through):
     PEPK_STORE_PASSWORD=... PEPK_KEY_PASSWORD=... \
       python3 scripts/pepk_export.py --jar pepk.jar -- \
         --keystore=release.jks --alias=... --output=out.zip \
-        --encryptionkey=<hex> --include-cert
+        --rsa-aes-encryption --encryption-key-path=encryption_public_key.pem \
+        --include-cert
+    (or the legacy `--encryptionkey=<hex>` instead of the two PEM flags;
+    scripts/pepk_encryption_key.py decides which from the pasted input)
 
 Exit code = pepk's exit code (1 on a bad password / alias / key, 0 on
 success). Proven 2026-10-01 in Cloud Shell against throwaway PKCS12 and JKS
