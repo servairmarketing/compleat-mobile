@@ -1,7 +1,10 @@
 # Google Play internal distribution for Com-Pleat IMS (compleat-mobile) — PLAN
 
-Written 2026-09-28. **Proposal only — nothing is built.** Joe rules on the
-decisions in §0 before any workflow, manifest or Dart change lands.
+Written 2026-09-28 as a proposal. **STATUS 2026-10-02: COMPLETE — see §8
+(close-out).** Release 80 (1.0.79) is on the Play internal track, all devices
+install from Play, the privacy page is on LIVE, and CI uploads are keyless.
+§1–§6 below are the original proposal (kept as the record); §7 is the build
+log; §8 is the close-out and the one remaining proof.
 
 Why: every sideloaded APK install/update trips Google Play Protect
 ("harmful app blocked") — 05_SYNC_STATE backlog #25 / Bug #19 already says
@@ -661,7 +664,7 @@ project `project-f05aa3b5-e37d-4c19-a03`, number 793462624071) [V]:**
 pool/provider can be deleted with
 `gcloud iam workload-identity-pools delete github --location=global --project=project-f05aa3b5-e37d-4c19-a03`.
 
-### 7.4 D6 privacy page — deploy command (NOT run; Joe runs, after merge)
+### 7.4 D6 privacy page — deploy command — **DONE 2026-10-02** (Joe: TEST verified, then LIVE hosting release 17:26:16Z; served page byte-identical to `aa17095` [V]; URL live: `https://project-f05aa3b5-e37d-4c19-a03.web.app/privacy.html`)
 
 URL once live: `https://project-f05aa3b5-e37d-4c19-a03.web.app/privacy.html`
 (LIVE site id from `.firebaserc`; `/index.html` on that host answers 200 and
@@ -783,3 +786,43 @@ the runner in an `always()` step.
 7. Delete the downloaded zip from your machine (the .pem can stay — it is
    public). The artifact expires after one day; the workflow can be re-run
    any time.
+
+---
+
+## 8. CLOSE-OUT 2026-10-02 — project COMPLETE
+
+| Piece | State | Evidence |
+|---|---|---|
+| D1 Internal testing track | DONE | Release **80 (1.0.79)** live on Internal testing; tester list "IMS Warehouse" (Joe) |
+| D2 Play App Signing = our keystore (PEPK, §7.5) | DONE | Upload fingerprint-verified in the console (Joe) |
+| D3 GitHub Release APK fallback | KEPT | `v1.0.79` Release exists; retire after two clean Play releases |
+| D4 "Check for Update" → opens Play Store (prod flavor) | DONE | shipped in `main` 204c992 / v1.0.79 |
+| D5 Devices | DONE | Joe's phone + both warehouse Zebras installed/updated from Play (Joe) |
+| D6 Privacy page on LIVE | DONE | §7.4; LIVE serves `aa17095` byte-identical [V 2026-10-02] |
+| D7 Service account in the LIVE project | DONE, **keyless** | `play-publisher` has no key and no project roles; Play Console grant = "Release to testing tracks" on Com-Pleat IMS only (Joe) |
+| API access link + Android Developer API | DONE | Play Console linked to `project-f05aa3b5-e37d-4c19-a03` (Joe); API enabled [V] |
+| CI upload credential | DONE (keyless, §7.3.2) | WIF pool `github` + provider `github-oidc` on the LIVE project, SA binding for `servairmarketing/compleat-mobile` only [V]; repo variable `PLAY_WIF_PROVIDER` set (Joe) [V]; workflow merged `main` c9f7578, TEST build green [V] |
+
+**One remaining proof (not a click to do today):** the keyless upload has
+been verified by reading the actions' source, never by running it. The next
+LIVE promotion (plan §3.K: bump `+N`, merge, dispatch **Build APK**) is the
+proof — its "Authenticate to Google Cloud" and "Upload to Google Play" steps
+must be green and the Play Console must show the new internal release. If
+the auth step fails, the first things to check are the SA binding and the
+provider's attribute condition (`assertion.repository_owner == 'servairmarketing'`), both
+from Cloud Shell, no key involved. The AAB artifact + manual console upload
+remains the fallback for that one release.
+
+**Optional, only when the app moves beyond internal testing:** paste the
+privacy URL (§7.4) into Play Console → App content → Privacy policy, and
+fill the Data safety form (§4.3).
+
+**Not done on purpose:** no JSON key exists anywhere (org policy), secret
+`PLAY_SERVICE_ACCOUNT_JSON` was never created and is referenced nowhere;
+§3.G.3 / §3.I / §7.3 steps 5 + 7 are superseded by §7.3.2.
+
+**For the compleat-sales lane:** reuse the same pool/provider and the same
+service account; add one binding
+(`roles/iam.workloadIdentityUser` for `attribute.repository/servairmarketing/compleat-sales`),
+the same repo variable, and the same two workflow steps; invite nothing new
+in the Play Console beyond "Add app → Compleat Sales" on the existing user.
