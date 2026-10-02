@@ -319,7 +319,8 @@ manually first by creating a release through the play console" **[V]**)
    project (the page offers a button; otherwise Cloud Console → APIs &
    Services → Enable APIs → "Google Play Android Developer API").
 
-**G — Service account + JSON key (Cloud Console)**
+**G — Service account + JSON key (Cloud Console)** — ⚠ G.3 (JSON key) is
+IMPOSSIBLE: org policy forbids keys. SUPERSEDED by keyless auth, §7.3.2.
 1. https://console.cloud.google.com/iam-admin/serviceaccounts?project=project-f05aa3b5-e37d-4c19-a03
    → **Create service account**.
 2. Name `play-publisher`, description `Google Play uploads from GitHub
@@ -342,7 +343,8 @@ manually first by creating a release through the play console" **[V]**)
 4. Later, when the sales app record exists: same user → **Add app** →
    Compleat Sales → the same permission. Nothing else to redo.
 
-**I — GitHub secret (compleat-mobile)**
+**I — GitHub secret (compleat-mobile)** — SUPERSEDED 2026-10-02: no secret;
+a repo VARIABLE `PLAY_WIF_PROVIDER` instead, §7.3.2.
 1. https://github.com/servairmarketing/compleat-mobile/settings/secrets/actions
    → **New repository secret**.
 2. Name **exactly** `PLAY_SERVICE_ACCOUNT_JSON`; value = the **whole
@@ -596,6 +598,68 @@ unchanged.
   `gh secret list` 2026-10-02: only the four April signing secrets exist [V].
 - Step 8 effectively DONE for Joe's device; remaining Zebras per §3.J.
 - Step 9 = plan §3.K, after 6–7.
+
+#### 7.3.2 BLOCKER + resolution 2026-10-02 — JSON key impossible → keyless (Workload Identity Federation)
+
+**Blocker (Joe, Cloud Console):** "Service account key creation is disabled" —
+org policy `iam.disableServiceAccountKeyCreation` is enforced on organization
+`servairmarketing-org` (714398854313, Secure-by-Default enforcement). Steps
+§3.G.3 / §3.I / §7.3 5+7 cannot be done as written.
+
+**Decision (recommended (a), built):** keyless auth. The LIVE job mints a
+GitHub OIDC token and exchanges it for a short-lived (≈1 h) access token
+impersonating `play-publisher`. No Google credential is stored anywhere —
+not in GitHub, not on a laptop. Option (b) (org-policy exception) was
+possible — `servairmarketing@gmail.com` holds `roles/resourcemanager.organizationAdmin`
+on the org [V] — but rejected: it would reinstate a long-lived key that the
+org policy exists to prevent, and it needs the Organization Policy API +
+admin role for a one-off. Nothing about the Play Console side changes: the
+service account, its email and its "Release to testing tracks" grant are
+the identity Play sees.
+
+**Built on Google Cloud from Cloud Shell (`servairmarketing@gmail.com`, LIVE
+project `project-f05aa3b5-e37d-4c19-a03`, number 793462624071) [V]:**
+- `sts.googleapis.com` enabled (`iamcredentials` + `androidpublisher` were already on).
+- Workload Identity Pool `github` + OIDC provider `github-oidc`
+  (issuer `https://token.actions.githubusercontent.com`; attribute condition
+  `assertion.repository_owner == 'servairmarketing'`; maps
+  `attribute.repository`, `attribute.repository_owner`, `attribute.actor`).
+- Binding on the service account ONLY (still no project roles):
+  `roles/iam.workloadIdentityUser` →
+  `principalSet://iam.googleapis.com/projects/793462624071/locations/global/workloadIdentityPools/github/attribute.repository/servairmarketing/compleat-mobile`.
+  The sales lane adds a sibling binding for `servairmarketing/compleat-sales`
+  when its Android track is built (same pool/provider, same SA).
+- Provider resource name (public-safe; it is the repo VARIABLE value):
+  `projects/793462624071/locations/global/workloadIdentityPools/github/providers/github-oidc`
+
+**Built in the repo (branch `fix/play-upload-wif`, NOT merged):**
+- `.github/workflows/build.yml` LIVE job: `permissions.id-token: write`; gate
+  changed from secret `PLAY_SERVICE_ACCOUNT_JSON` to repo **variable**
+  `PLAY_WIF_PROVIDER` (`HAS_PLAY_WIF`); new step
+  `google-github-actions/auth@v3.0.0` (workload_identity_provider +
+  service_account, writes a federated credential file); the unchanged
+  `r0adkll/upload-google-play@v1.1.5` now takes `serviceAccountJson` = that
+  file path. Verified by reading the action's v1.1.5 source: the input is
+  just exported as `GOOGLE_APPLICATION_CREDENTIALS` and consumed by
+  google-auth-library (`^9.15.0`, bundled `lib/index.js` contains the
+  `external_account` + impersonation code path) [V-code-read, not yet run].
+- Skip notice renamed; secret `PLAY_SERVICE_ACCOUNT_JSON` is referenced
+  nowhere any more.
+
+**Joe's remaining clicks (replaces §7.3 steps 5 + 7):**
+1. GitHub → compleat-mobile → Settings → Secrets and variables → Actions →
+   **Variables** tab → New repository variable: name `PLAY_WIF_PROVIDER`,
+   value = the provider resource name above. (A variable, not a secret.)
+2. Merge `fix/play-upload-wif` → `main` (push to main builds only `test-v*`;
+   the LIVE job is manual-dispatch only — nothing reaches Play).
+3. First proof = plan §3.K / §7.3 step 9: bump `+N`, merge, dispatch
+   **Build APK**; the run's "Authenticate to Google Cloud" and "Upload to
+   Google Play" steps must both be green and the Play Console must show the
+   new internal release. Until then the keyless path is [V-code-read] only.
+
+**Rollback:** delete the repo variable (the Play step skips again); the
+pool/provider can be deleted with
+`gcloud iam workload-identity-pools delete github --location=global --project=project-f05aa3b5-e37d-4c19-a03`.
 
 ### 7.4 D6 privacy page — deploy command (NOT run; Joe runs, after merge)
 

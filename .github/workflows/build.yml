@@ -13,11 +13,20 @@ jobs:
     # D1–D7): the LIVE channel is Google Play INTERNAL TESTING. This job
     # builds a signed Android App Bundle (AAB, Play's required format),
     # always uploads it as the workflow artifact `compleat-mobile-aab`, and —
-    # ONLY when the repo secret PLAY_SERVICE_ACCOUNT_JSON exists — pushes it
-    # to the Play `internal` track. Until the secret is added the Play step
-    # is skipped (not failed), so this workflow is safe to run before the
+    # ONLY when the repo VARIABLE PLAY_WIF_PROVIDER exists — pushes it to the
+    # Play `internal` track. Until the variable is added the Play step is
+    # skipped (not failed), so this workflow is safe to run before the
     # console work is finished; the AAB artifact is what Joe uploads by hand
     # for the one-time first release (Play's API cannot create it).
+    #
+    # KEYLESS AUTH (2026-10-02, plan §7.3.2): the organization policy
+    # iam.disableServiceAccountKeyCreation forbids JSON keys for the
+    # play-publisher service account, so there is NO stored Google credential.
+    # The job mints a short-lived GitHub OIDC token (permissions: id-token)
+    # and exchanges it, via the Workload Identity Federation provider named in
+    # PLAY_WIF_PROVIDER, for a ~1 h access token impersonating play-publisher.
+    # The service account trusts ONLY this repository
+    # (roles/iam.workloadIdentityUser on attribute.repository/servairmarketing/compleat-mobile).
     # D3: the GitHub Release + APK is KEPT as the emergency sideload fallback
     # (same signing key as Play → installs over a Play install); retire it
     # after two clean Play releases.
@@ -25,10 +34,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write   # GitHub OIDC token for the keyless Google auth step
     env:
-      # `secrets` is not allowed in a step-level `if`, so the presence check
-      # is evaluated here (same pattern as compleat-sales HAS_KEYSTORE).
-      HAS_PLAY_SA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      # Presence check evaluated once here (same pattern as compleat-sales
+      # HAS_KEYSTORE). PLAY_WIF_PROVIDER is a repo VARIABLE (not a secret —
+      # the provider name is public-safe); value = the full resource name
+      # projects/<number>/locations/global/workloadIdentityPools/github/providers/github-oidc
+      HAS_PLAY_WIF: ${{ vars.PLAY_WIF_PROVIDER != '' }}
+      PLAY_SERVICE_ACCOUNT: play-publisher@project-f05aa3b5-e37d-4c19-a03.iam.gserviceaccount.com
       PLAY_PACKAGE_NAME: com.compleat.compleat_mobile
     steps:
       - uses: actions/checkout@v3
@@ -92,25 +105,40 @@ jobs:
           name: compleat-mobile-aab
           path: build/app/outputs/bundle/prodRelease/app-prod-release.aab
           if-no-files-found: error
+      - name: Authenticate to Google Cloud (keyless — Workload Identity Federation)
+        # Writes a short-lived external-account credential file for the
+        # play-publisher service account; no key is stored anywhere. Pinned
+        # to google-github-actions/auth v3.0.0 (node24, 2026). Skipped until
+        # the repo variable PLAY_WIF_PROVIDER exists (plan §7.3.2).
+        if: env.HAS_PLAY_WIF == 'true'
+        id: gcp-auth
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.PLAY_WIF_PROVIDER }}
+          service_account: ${{ env.PLAY_SERVICE_ACCOUNT }}
+          create_credentials_file: true
       - name: Upload to Google Play (internal testing track)
-        # Skipped (not failed) until the repo secret PLAY_SERVICE_ACCOUNT_JSON
-        # exists — plan §3 steps F–I. Service account: play-publisher@…
-        # (LIVE project), invited into the Play Console with "Release to
-        # testing tracks" on Com-Pleat IMS only. Pinned to the newest v1.x
-        # tag of r0adkll/upload-google-play (v1.1.5, 2026-04-21).
-        if: env.HAS_PLAY_SA == 'true'
+        # Skipped (not failed) until the repo variable PLAY_WIF_PROVIDER
+        # exists — plan §7.3.2. Service account: play-publisher@… (LIVE
+        # project), invited into the Play Console with "Release to testing
+        # tracks" on Com-Pleat IMS only. Pinned to the newest v1.x tag of
+        # r0adkll/upload-google-play (v1.1.5, 2026-04-21); its
+        # `serviceAccountJson` input is just a path handed to Google's auth
+        # library, which accepts the federated credential file above
+        # (verified by reading v1.1.5 src/main.ts + src/edits.ts).
+        if: env.HAS_PLAY_WIF == 'true'
         uses: r0adkll/upload-google-play@v1.1.5
         with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          serviceAccountJson: ${{ steps.gcp-auth.outputs.credentials_file_path }}
           packageName: ${{ env.PLAY_PACKAGE_NAME }}
           releaseFiles: build/app/outputs/bundle/prodRelease/app-prod-release.aab
           track: internal
           status: completed
           releaseName: ${{ steps.version.outputs.build_number }} (${{ steps.version.outputs.version }})
-      - name: Play upload skipped (no PLAY_SERVICE_ACCOUNT_JSON secret yet)
-        if: env.HAS_PLAY_SA != 'true'
+      - name: Play upload skipped (no PLAY_WIF_PROVIDER variable yet)
+        if: env.HAS_PLAY_WIF != 'true'
         run: |
-          echo "::notice::PLAY_SERVICE_ACCOUNT_JSON is not set — the AAB was NOT uploaded to Google Play." \
+          echo "::notice::Repo variable PLAY_WIF_PROVIDER is not set — the AAB was NOT uploaded to Google Play." \
                "Download the compleat-mobile-aab artifact and upload it in the Play Console (plan §3 step E)."
       - name: Build signed APK (GitHub Release fallback, D3)
         run: |
