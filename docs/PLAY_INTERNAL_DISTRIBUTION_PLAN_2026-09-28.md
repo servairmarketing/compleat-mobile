@@ -578,13 +578,31 @@ unchanged.
 9. Next LIVE promotion: bump `+N`, merge, dispatch → the run uploads to Play
    itself (plan §3.K).
 
+#### 7.3.1 Status 2026-10-02 (session note; Joe's console facts are as reported by Joe, not re-verified here)
+
+- Steps 1–3 DONE (Joe): `main` 204c992; internal release "80 (1.0.79)" live to
+  the "IMS Warehouse" list; a real device updated the sideloaded app in place.
+- Step 4 (Play Console → Setup → API access, link Cloud project) — NOT yet done; Joe's next click.
+  gcloud side DONE from Cloud Shell as `servairmarketing@gmail.com` [V]:
+  `androidpublisher.googleapis.com` enabled on `project-f05aa3b5-e37d-4c19-a03`;
+  service account `play-publisher@project-f05aa3b5-e37d-4c19-a03.iam.gserviceaccount.com`
+  created, **no project roles** (IAM policy grep empty).
+- Step 5 (JSON key) — NOT created from Cloud Shell: the session's secret-write
+  guard refused to load a key into GitHub from here, so the key is created
+  ONCE by Joe in Cloud Console (plan §3.G.3) and goes laptop → GitHub Secrets
+  only. Never paste it into a chat.
+- Steps 6–7 pending (Joe clicks: §3.H invite the SA with Release to testing
+  tracks on Com-Pleat IMS; §3.I secret `PLAY_SERVICE_ACCOUNT_JSON`).
+  `gh secret list` 2026-10-02: only the four April signing secrets exist [V].
+- Step 8 effectively DONE for Joe's device; remaining Zebras per §3.J.
+- Step 9 = plan §3.K, after 6–7.
+
 ### 7.4 D6 privacy page — deploy command (NOT run; Joe runs, after merge)
 
 URL once live: `https://project-f05aa3b5-e37d-4c19-a03.web.app/privacy.html`
 (LIVE site id from `.firebaserc`; `/index.html` on that host answers 200 and
-`/privacy.html` answers 404 today [V curl 2026-10-01]). ⚑ The page carries a
-**placeholder contact email** — supply the address and I fill it in before
-anything is deployed. TEST first, then LIVE, both from the `compleat-inventory`
+`/privacy.html` answers 404 today [V curl 2026-10-01]). Contact email on the page = `ecom@com-pleat.com`
+(compleat-inventory `main` aa17095, 2026-10-02; NOT deployed). TEST first, then LIVE, both from the `compleat-inventory`
 repo root on `main` after `feat/play-privacy-page` is merged:
 
 ```
